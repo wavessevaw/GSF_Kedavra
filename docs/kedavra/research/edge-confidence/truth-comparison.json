@@ -1,0 +1,173 @@
+[
+  {
+    "scene": "near_object",
+    "frame": "near_object_t333_gen.ppm",
+    "changed_pixels": 353,
+    "improved_pixels": 320,
+    "worsened_pixels": 32,
+    "equal_error_pixels": 1,
+    "squared_error_delta": -68368
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t500_gen.ppm",
+    "changed_pixels": 303,
+    "improved_pixels": 271,
+    "worsened_pixels": 31,
+    "equal_error_pixels": 1,
+    "squared_error_delta": -414861
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t667_gen.ppm",
+    "changed_pixels": 245,
+    "improved_pixels": 140,
+    "worsened_pixels": 105,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 59646
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t333_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t500_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t667_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t333_gen.ppm",
+    "changed_pixels": 267,
+    "improved_pixels": 255,
+    "worsened_pixels": 8,
+    "equal_error_pixels": 4,
+    "squared_error_delta": 10753
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t500_gen.ppm",
+    "changed_pixels": 102,
+    "improved_pixels": 101,
+    "worsened_pixels": 1,
+    "equal_error_pixels": 0,
+    "squared_error_delta": -18577
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t667_gen.ppm",
+    "changed_pixels": 47,
+    "improved_pixels": 46,
+    "worsened_pixels": 1,
+    "equal_error_pixels": 0,
+    "squared_error_delta": -15115
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t333_gen.ppm",
+    "changed_pixels": 365,
+    "improved_pixels": 243,
+    "worsened_pixels": 117,
+    "equal_error_pixels": 5,
+    "squared_error_delta": -485717
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t500_gen.ppm",
+    "changed_pixels": 421,
+    "improved_pixels": 309,
+    "worsened_pixels": 111,
+    "equal_error_pixels": 1,
+    "squared_error_delta": -700052
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t667_gen.ppm",
+    "changed_pixels": 364,
+    "improved_pixels": 211,
+    "worsened_pixels": 150,
+    "equal_error_pixels": 3,
+    "squared_error_delta": -992095
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_seq_gen.ppm",
+    "changed_pixels": 964,
+    "improved_pixels": 375,
+    "worsened_pixels": 578,
+    "equal_error_pixels": 11,
+    "squared_error_delta": 1034378
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t333_gen.ppm",
+    "changed_pixels": 1166,
+    "improved_pixels": 400,
+    "worsened_pixels": 751,
+    "equal_error_pixels": 15,
+    "squared_error_delta": 3092778
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t500_gen.ppm",
+    "changed_pixels": 1079,
+    "improved_pixels": 511,
+    "worsened_pixels": 558,
+    "equal_error_pixels": 10,
+    "squared_error_delta": -73349
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t667_gen.ppm",
+    "changed_pixels": 1676,
+    "improved_pixels": 824,
+    "worsened_pixels": 837,
+    "equal_error_pixels": 15,
+    "squared_error_delta": -85206
+  },
+  {
+    "scene": "static",
+    "frame": "static_t333_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "static",
+    "frame": "static_t500_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "static",
+    "frame": "static_t667_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  }
+]
