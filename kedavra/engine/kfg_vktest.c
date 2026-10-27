@@ -1185,7 +1185,8 @@ int main(int argc, char **argv)
 			qsort(samples[i], (size_t)reps, sizeof(double), cmp_double);
 			double med = samples[i][reps / 2] / 1e6, p99 = samples[i][(reps * 99) / 100] / 1e6;
 			printf("  %-12s %.3f (p99 %.3f)\n", labels[i], med, p99);
-			if (strncmp(labels[i], "g", 1))
+			// "global" is an analysis pass; only g1:/g2: belong to generated outputs.
+			if (strncmp(labels[i], "g1:", 3) && strncmp(labels[i], "g2:", 3))
 				analysis += med;
 			else
 				gen += med;
