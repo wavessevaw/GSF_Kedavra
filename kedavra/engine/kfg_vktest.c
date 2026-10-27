@@ -689,7 +689,12 @@ static int border_checks(kfg_vk *vk)
 		for (int step = 1; step < 64; step++) {
 			float t = step / 64.0f;
 			kfg_plan p;
+			// This fixture uploads a pair field directly; per-phase mode would replace
+			// it with a selection from uninitialized luma/flow. Exercise pair warp.
+			const int saved_per_phase_select = kfg_per_phase_select;
+			kfg_per_phase_select = 0;
 			kfg_plan_generate(&p, w, h, 0, 1, 1, t, 0);
+			kfg_per_phase_select = saved_per_phase_select;
 			run_plan(&e, &p, NULL, NULL);
 			kfg_vk_download_rgba8(vk, &e.output, out);
 			int lo = axis == 0 ? (h/2)*w : w/2;
@@ -1155,6 +1160,15 @@ int main(int argc, char **argv)
 		render(s, 1.0, w, h, B);
 		kfg_vk_upload_rgba8(&vk, &e.color[0], A);
 		kfg_vk_upload_rgba8(&vk, &e.color[1], B);
+		// The preceding test may use a different scene. Build the current pair's
+		// A pyramid and a valid temporal seed before collecting timings.
+		kfg_plan warm;
+		kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 1, 0, 0, 0, -1, &tune);
+		if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark pyramid init failed\n"); return 1; }
+		if (g_temporal) {
+			kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 0, 1, 0, 1, -1, &tune);
+			if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark temporal seed init failed\n"); return 1; }
+		}
 		for (int r = 0; r < reps + 3; r++) {
 			kfg_plan pa, g1, g2;
 			kfg_plan_analyze(&pa, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, g_temporal ? 0 : -1, &tune);
@@ -1185,7 +1199,8 @@ int main(int argc, char **argv)
 			qsort(samples[i], (size_t)reps, sizeof(double), cmp_double);
 			double med = samples[i][reps / 2] / 1e6, p99 = samples[i][(reps * 99) / 100] / 1e6;
 			printf("  %-12s %.3f (p99 %.3f)\n", labels[i], med, p99);
-			if (strncmp(labels[i], "g", 1))
+			// "global" is an analysis pass; only g1:/g2: belong to generated outputs.
+			if (strncmp(labels[i], "g1:", 3) && strncmp(labels[i], "g2:", 3))
 				analysis += med;
 			else
 				gen += med;

@@ -1,0 +1,56 @@
+name: Build standalone Windows Vulkan harness
+on:
+  push:
+    branches: [fix/kedavra-benchmark-classification]
+permissions:
+  contents: read
+jobs:
+  verify-test-harness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y build-essential libvulkan-dev mesa-vulkan-drivers glslang-tools
+      - name: Build harness and shaders
+        run: make -C kedavra -j2 all
+      - name: Check pair border fixture and benchmark totals
+        run: |
+          set -o pipefail
+          export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name '*lvp*json' | head -1)
+          export LP_NUM_THREADS=2
+          kedavra/build/kfg_vktest --spv kedavra/build --scene border --per-phase
+          kedavra/build/kfg_vktest --spv kedavra/build --scene pan --bench 8 | tee bench.log
+          python3 kedavra/tools/check_benchmark_totals.py bench.log
+  cross-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+      - uses: actions/checkout@v4
+        with:
+          ref: 5f22938b55f9853f764e927c847d9c1a8d9a8c04
+          path: baseline
+      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 libvulkan-dev glslang-tools
+      - name: Cross-compile the existing test harness
+        run: |
+          mkdir -p headers out/baseline out/candidate
+          cp -r /usr/include/vulkan headers/
+          if [ -d /usr/include/vk_video ]; then cp -r /usr/include/vk_video headers/; fi
+          printf 'LIBRARY vulkan-1.dll\nEXPORTS\n' > vulkan.def
+          grep -ohE '\bvk[A-Z][A-Za-z0-9_]+' candidate/kedavra/engine/kfg_vk.c | sort -u >> vulkan.def
+          x86_64-w64-mingw32-dlltool -d vulkan.def -l libvulkan-1.a
+          for version in baseline candidate; do
+            x86_64-w64-mingw32-gcc -O2 -std=c11 -Iheaders -I"$version/kedavra/engine" \
+              "$version/kedavra/engine/kfg_vktest.c" "$version/kedavra/engine/kfg_vk.c" \
+              -L. -lvulkan-1 -lm -o "out/$version/kfg_vktest.exe"
+            for shader in "$version"/kedavra/shaders/*.comp; do
+              glslangValidator -V --target-env vulkan1.1 -I"$version/kedavra/shaders" \
+                -o "out/$version/$(basename "${shader%.comp}").spv" "$shader"
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-vulkan-harness
+          path: out/
+          retention-days: 14
+
