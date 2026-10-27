@@ -1,0 +1,41 @@
+name: Build edge confidence sweep harness
+on:
+  push:
+    branches: [experiment/kedavra-edge-sweep]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 5f22938b55f9853f764e927c847d9c1a8d9a8c04
+          path: baseline
+      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 libvulkan-dev glslang-tools
+      - name: Build Windows Vulkan corpus and shader variants
+        run: |
+          mkdir -p headers out/base
+          cp -r /usr/include/vulkan headers/
+          if [ -d /usr/include/vk_video ]; then cp -r /usr/include/vk_video headers/; fi
+          printf 'LIBRARY vulkan-1.dll\nEXPORTS\n' > vulkan.def
+          grep -ohE '\bvk[A-Z][A-Za-z0-9_]+' kedavra/engine/kfg_vk.c | sort -u >> vulkan.def
+          x86_64-w64-mingw32-dlltool -d vulkan.def -l libvulkan-1.a
+          x86_64-w64-mingw32-gcc -O2 -std=c11 -Iheaders -Ikedavra/engine \
+            kedavra/engine/kfg_vktest.c kedavra/engine/kfg_vk.c -L. -lvulkan-1 -lm -o out/kfg_vktest.exe
+          for shader in kedavra/shaders/*.comp; do
+            glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders -o "out/base/$(basename "${shader%.comp}").spv" "$shader"
+          done
+          glslangValidator -V --target-env vulkan1.1 -Ibaseline/kedavra/shaders -o out/base/kfg_warp.spv baseline/kedavra/shaders/kfg_warp.comp
+          for strength in 0.002 0.005 0.01; do
+            mkdir "out/$strength"
+            cp out/base/*.spv "out/$strength/"
+            sed "s/0.02 \* clamp(-nearest_edge/${strength} * clamp(-nearest_edge/" kedavra/shaders/kfg_warp.comp > "kedavra/shaders/kfg_sweep_${strength}.comp"
+            glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders -o "out/$strength/kfg_warp.spv" "kedavra/shaders/kfg_sweep_${strength}.comp"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-sweep-windows
+          path: out/
+          retention-days: 14
