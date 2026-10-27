@@ -689,7 +689,12 @@ static int border_checks(kfg_vk *vk)
 		for (int step = 1; step < 64; step++) {
 			float t = step / 64.0f;
 			kfg_plan p;
+			// This fixture uploads a pair field directly; per-phase mode would replace
+			// it with a selection from uninitialized luma/flow. Exercise pair warp.
+			const int saved_per_phase_select = kfg_per_phase_select;
+			kfg_per_phase_select = 0;
 			kfg_plan_generate(&p, w, h, 0, 1, 1, t, 0);
+			kfg_per_phase_select = saved_per_phase_select;
 			run_plan(&e, &p, NULL, NULL);
 			kfg_vk_download_rgba8(vk, &e.output, out);
 			int lo = axis == 0 ? (h/2)*w : w/2;
