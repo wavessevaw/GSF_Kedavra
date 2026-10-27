@@ -1,0 +1,353 @@
+[
+  {
+    "scene": "pan",
+    "frame": "pan_t333_gen.ppm",
+    "variant": "0.002",
+    "changed": 18,
+    "improved": 11,
+    "worsened": 7,
+    "delta_sse": 9794
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t333_gen.ppm",
+    "variant": "0.005",
+    "changed": 63,
+    "improved": 36,
+    "worsened": 27,
+    "delta_sse": 9519
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t333_gen.ppm",
+    "variant": "0.01",
+    "changed": 150,
+    "improved": 94,
+    "worsened": 56,
+    "delta_sse": -202217
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t500_gen.ppm",
+    "variant": "0.002",
+    "changed": 33,
+    "improved": 23,
+    "worsened": 10,
+    "delta_sse": -93105
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t500_gen.ppm",
+    "variant": "0.005",
+    "changed": 83,
+    "improved": 65,
+    "worsened": 18,
+    "delta_sse": -148508
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t500_gen.ppm",
+    "variant": "0.01",
+    "changed": 184,
+    "improved": 134,
+    "worsened": 49,
+    "delta_sse": -392722
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t667_gen.ppm",
+    "variant": "0.002",
+    "changed": 28,
+    "improved": 9,
+    "worsened": 19,
+    "delta_sse": -116786
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t667_gen.ppm",
+    "variant": "0.005",
+    "changed": 92,
+    "improved": 44,
+    "worsened": 48,
+    "delta_sse": -380608
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t667_gen.ppm",
+    "variant": "0.01",
+    "changed": 186,
+    "improved": 107,
+    "worsened": 77,
+    "delta_sse": -790132
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_seq_gen.ppm",
+    "variant": "0.002",
+    "changed": 103,
+    "improved": 35,
+    "worsened": 64,
+    "delta_sse": 166876
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_seq_gen.ppm",
+    "variant": "0.005",
+    "changed": 273,
+    "improved": 95,
+    "worsened": 172,
+    "delta_sse": 405773
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_seq_gen.ppm",
+    "variant": "0.01",
+    "changed": 519,
+    "improved": 202,
+    "worsened": 310,
+    "delta_sse": 557426
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t333_gen.ppm",
+    "variant": "0.002",
+    "changed": 115,
+    "improved": 49,
+    "worsened": 65,
+    "delta_sse": 212401
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t333_gen.ppm",
+    "variant": "0.005",
+    "changed": 288,
+    "improved": 119,
+    "worsened": 167,
+    "delta_sse": 622806
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t333_gen.ppm",
+    "variant": "0.01",
+    "changed": 625,
+    "improved": 234,
+    "worsened": 387,
+    "delta_sse": 1761460
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t500_gen.ppm",
+    "variant": "0.002",
+    "changed": 93,
+    "improved": 53,
+    "worsened": 39,
+    "delta_sse": -148725
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t500_gen.ppm",
+    "variant": "0.005",
+    "changed": 260,
+    "improved": 127,
+    "worsened": 131,
+    "delta_sse": -302249
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t500_gen.ppm",
+    "variant": "0.01",
+    "changed": 541,
+    "improved": 256,
+    "worsened": 281,
+    "delta_sse": 95683
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t667_gen.ppm",
+    "variant": "0.002",
+    "changed": 165,
+    "improved": 80,
+    "worsened": 83,
+    "delta_sse": 111342
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t667_gen.ppm",
+    "variant": "0.005",
+    "changed": 407,
+    "improved": 191,
+    "worsened": 211,
+    "delta_sse": 542924
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t667_gen.ppm",
+    "variant": "0.01",
+    "changed": 853,
+    "improved": 398,
+    "worsened": 445,
+    "delta_sse": 418508
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t333_gen.ppm",
+    "variant": "0.002",
+    "changed": 10,
+    "improved": 6,
+    "worsened": 4,
+    "delta_sse": 724
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t333_gen.ppm",
+    "variant": "0.005",
+    "changed": 35,
+    "improved": 26,
+    "worsened": 9,
+    "delta_sse": -16312
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t333_gen.ppm",
+    "variant": "0.01",
+    "changed": 64,
+    "improved": 47,
+    "worsened": 17,
+    "delta_sse": -18229
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t500_gen.ppm",
+    "variant": "0.002",
+    "changed": 6,
+    "improved": 4,
+    "worsened": 2,
+    "delta_sse": -42613
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t500_gen.ppm",
+    "variant": "0.005",
+    "changed": 32,
+    "improved": 22,
+    "worsened": 10,
+    "delta_sse": -98158
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t500_gen.ppm",
+    "variant": "0.01",
+    "changed": 81,
+    "improved": 62,
+    "worsened": 19,
+    "delta_sse": -214655
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t667_gen.ppm",
+    "variant": "0.002",
+    "changed": 7,
+    "improved": 2,
+    "worsened": 5,
+    "delta_sse": 7440
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t667_gen.ppm",
+    "variant": "0.005",
+    "changed": 39,
+    "improved": 22,
+    "worsened": 17,
+    "delta_sse": 5029
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t667_gen.ppm",
+    "variant": "0.01",
+    "changed": 104,
+    "improved": 55,
+    "worsened": 49,
+    "delta_sse": 49391
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t333_gen.ppm",
+    "variant": "0.002",
+    "changed": 0,
+    "improved": 0,
+    "worsened": 0,
+    "delta_sse": 0
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t333_gen.ppm",
+    "variant": "0.005",
+    "changed": 10,
+    "improved": 7,
+    "worsened": 2,
+    "delta_sse": 2129
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t333_gen.ppm",
+    "variant": "0.01",
+    "changed": 33,
+    "improved": 27,
+    "worsened": 5,
+    "delta_sse": 2315
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t500_gen.ppm",
+    "variant": "0.002",
+    "changed": 0,
+    "improved": 0,
+    "worsened": 0,
+    "delta_sse": 0
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t500_gen.ppm",
+    "variant": "0.005",
+    "changed": 0,
+    "improved": 0,
+    "worsened": 0,
+    "delta_sse": 0
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t500_gen.ppm",
+    "variant": "0.01",
+    "changed": 15,
+    "improved": 14,
+    "worsened": 1,
+    "delta_sse": -1834
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t667_gen.ppm",
+    "variant": "0.002",
+    "changed": 1,
+    "improved": 0,
+    "worsened": 1,
+    "delta_sse": 1
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t667_gen.ppm",
+    "variant": "0.005",
+    "changed": 1,
+    "improved": 0,
+    "worsened": 1,
+    "delta_sse": 1
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t667_gen.ppm",
+    "variant": "0.01",
+    "changed": 15,
+    "improved": 14,
+    "worsened": 1,
+    "delta_sse": -1512
+  }
+]
