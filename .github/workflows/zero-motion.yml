@@ -1,0 +1,46 @@
+name: Zero motion lookup comparison
+on:
+  push:
+    branches: [experiment/kedavra-zero-motion-fetch]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+      - uses: actions/checkout@v4
+        with:
+          ref: 5f22938b55f9853f764e927c847d9c1a8d9a8c04
+          path: baseline
+      - name: Install Vulkan test tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools vulkan-tools python3-numpy python3-pil
+      - name: Build both versions
+        run: |
+          make -C baseline/kedavra -j2 all
+          make -C candidate/kedavra -j2 all
+          for version in baseline candidate; do
+            for shader in "$version"/kedavra/build/*.spv; do spirv-val --target-env vulkan1.1 "$shader"; done
+          done
+      - name: Execute regression and image comparison
+        run: |
+          set -o pipefail
+          export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name '*lvp*json' | head -1)
+          export LP_NUM_THREADS=2
+          mkdir -p q1-results
+          vulkaninfo --summary > q1-results/device.txt
+          /usr/bin/python3 candidate/kedavra/tools/compare_zero_motion.py "$GITHUB_WORKSPACE" | tee q1-results/comparison.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zero-motion-evidence
+          path: |
+            q1-results/**/*.json
+            q1-results/**/*.log
+            q1-results/*.log
+            q1-results/device.txt
+          retention-days: 14
+
