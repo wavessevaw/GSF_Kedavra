@@ -1,0 +1,85 @@
+{
+  "kind": "GLSL/SPIR-V compile and validation only; no GPU dispatch",
+  "commands": [
+    {
+      "variant": "baseline",
+      "shader": "kfg_me.comp",
+      "tool": "glslangValidator",
+      "exit": 0,
+      "stdout": "ISOLATED_TMP/baseline/kfg_me.comp\n",
+      "stderr": ""
+    },
+    {
+      "variant": "baseline",
+      "shader": "kfg_me.comp",
+      "tool": "spirv-val",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "variant": "baseline",
+      "shader": "kfg_warp.comp",
+      "tool": "glslangValidator",
+      "exit": 0,
+      "stdout": "ISOLATED_TMP/baseline/kfg_warp.comp\n",
+      "stderr": ""
+    },
+    {
+      "variant": "baseline",
+      "shader": "kfg_warp.comp",
+      "tool": "spirv-val",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "variant": "proposal",
+      "shader": "kfg_me.comp",
+      "tool": "glslangValidator",
+      "exit": 0,
+      "stdout": "ISOLATED_TMP/proposal/kfg_me.comp\n",
+      "stderr": ""
+    },
+    {
+      "variant": "proposal",
+      "shader": "kfg_me.comp",
+      "tool": "spirv-val",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "variant": "proposal",
+      "shader": "kfg_warp.comp",
+      "tool": "glslangValidator",
+      "exit": 0,
+      "stdout": "ISOLATED_TMP/proposal/kfg_warp.comp\n",
+      "stderr": ""
+    },
+    {
+      "variant": "proposal",
+      "shader": "kfg_warp.comp",
+      "tool": "spirv-val",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "baseline/kfg_me.comp": {
+    "spv_bytes": 27708,
+    "spv_sha256": "fe40b076104dc807bf3a403ced00640b3ec4299b236d18a9eec92417f3691e6b"
+  },
+  "baseline/kfg_warp.comp": {
+    "spv_bytes": 22848,
+    "spv_sha256": "ac87a80731714f9b2215aaa3fe7bab5ca4dd9bad6678f898952595e3bf191300"
+  },
+  "proposal/kfg_me.comp": {
+    "spv_bytes": 28452,
+    "spv_sha256": "e9fe4bc0c2885aea13c5fc33bd558cb9077d7541f48ee88b86a80829bdea998f"
+  },
+  "proposal/kfg_warp.comp": {
+    "spv_bytes": 22948,
+    "spv_sha256": "52ae463e6a6b3619e8ff1850160a8023285e8018ea6e76385a46909098c079ab"
+  }
+}

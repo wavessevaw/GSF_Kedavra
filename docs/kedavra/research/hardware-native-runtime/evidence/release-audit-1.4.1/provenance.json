@@ -1,0 +1,98 @@
+{
+  "kedavra/shaders/kfg_warp.comp": {
+    "blob": "72b04f987f62a62006e304ce117afe5c7d7ec815",
+    "bytes": 7777
+  },
+  "kedavra/shaders/kfg_select.comp": {
+    "blob": "2e721a758e2bec2c7a4789a19e5d095392dce130",
+    "bytes": 8463
+  },
+  "kedavra/shaders/kfg_me.comp": {
+    "blob": "01f3e7e92eeeae205ed1b22320e7b08e279a4bee",
+    "bytes": 8263
+  },
+  "kedavra/shaders/kfg_stats.comp": {
+    "blob": "3410cb9c8b3a4d140035623aeda403e6cc8de146",
+    "bytes": 6939
+  },
+  "kedavra/shaders/kfg_reduce.comp": {
+    "blob": "d2227f2fb8b0e3665c538f9c4853cc3674dff68b",
+    "bytes": 2074
+  },
+  "kedavra/shaders/kfg_common.glsl": {
+    "blob": "f4fa8bf26ba3e6aa6ddd4fc54e81d3ac5dad73a8",
+    "bytes": 3633
+  },
+  "kedavra/engine/kfg_plan.h": {
+    "blob": "7f3ac5f85d500aa04bd7ca32b0b843b2856bea33",
+    "bytes": 18101
+  },
+  "kedavra/sched/kfg_sched.h": {
+    "blob": "eb5e62788578c1fba2c3a558884d73c9920e6a08",
+    "bytes": 25005
+  },
+  "kedavra/sched/kfg_auto.h": {
+    "blob": "15322d4691231b5f635f7c54b2bc15c55287b232",
+    "bytes": 10265
+  },
+  "kedavra/gamescope/src/kfg/kfg.cpp": {
+    "blob": "ade945cb5ea31cedf8491fce55e074706c455da0",
+    "bytes": 57312
+  },
+  "kedavra/gamescope/src/kfg/kfg.hpp": {
+    "blob": "de307d8a12968da95d83196ead0b64b642cbddc0",
+    "bytes": 2685
+  },
+  "kedavra/gamescope/hooks.patch": {
+    "blob": "91d93d306b745adb74466c0de7340baa39dfaeb9",
+    "bytes": 9802
+  },
+  "kedavra/gamescope/apply.sh": {
+    "blob": "72b007c5921c595c831ae82482411f1475577bc2",
+    "bytes": 1658
+  },
+  "kedavra/engine/kfg_vktest.c": {
+    "blob": "4b1649db9780e12268e23ad1671048c782945f3a",
+    "bytes": 47008
+  },
+  "kedavra/engine/kfg_vk.c": {
+    "blob": "1c74db26a355ca2a53d4cbcf6ab70b4f7f7976a5",
+    "bytes": 20334
+  },
+  "kedavra/engine/kfg_vk.h": {
+    "blob": "974cf45bd9af262774d5994a1a514f6fc5029059",
+    "bytes": 2784
+  },
+  "kedavra/decky/main.py": {
+    "blob": "8737146ae1b406a520bd2c2a891b725e0fcf9c48",
+    "bytes": 6410
+  },
+  "kedavra/decky/py_modules/kedavra_ctl.py": {
+    "blob": "a1fb76dc8d81339c7c9a4f9251e7f622233d919d",
+    "bytes": 8296
+  },
+  "kedavra/decky/py_modules/kedavra_install.py": {
+    "blob": "a076cd24f450811fddb437149863bf15458db694",
+    "bytes": 16970
+  },
+  "kedavra/sched/kfg_sim.c": {
+    "blob": "d099a906adad7a3aaf1b221b12708193ac077c8a",
+    "bytes": 11208
+  },
+  "kedavra/sched/run_scenarios.py": {
+    "blob": "8f80a87d541db5034321c4847fb4f2805c8314e9",
+    "bytes": 9009
+  },
+  "kedavra/sched/compare_pacing.py": {
+    "blob": "634682f0d8f768d50ac693b5c824b48968f2e5b5",
+    "bytes": 1179
+  },
+  "docs/kedavra/evidence/1.4.1-rc.1/README.md": {
+    "blob": "9bc25c0115abef31e4023ea66909e2deed4dd6ae",
+    "bytes": 4979
+  },
+  ".github/workflows/kedavra.yml": {
+    "blob": "9a1c9b5875aedc506afaeae2ff5d42340ab25d36",
+    "bytes": 9098
+  }
+}

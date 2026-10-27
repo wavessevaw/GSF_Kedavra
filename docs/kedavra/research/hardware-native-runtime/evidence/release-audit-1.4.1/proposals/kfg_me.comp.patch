@@ -1,0 +1,17 @@
+--- a/kedavra/shaders/kfg_me.comp
++++ b/kedavra/shaders/kfg_me.comp
+@@ -127,9 +127,13 @@
+ 		// whose coarse vector landed on a wrong but similar-looking match (flat or repeating
+ 		// texture) takes the camera motion when it fits as well.
+ 		vec2 origin = base;
++		float base_sad = sad(sa, sb, q, base, size);
+ 		for (int i = 0; i < npred; i++) {
+ 			vec2 o = i == npred - 1 ? preds[i] : base;
+-			float c = sad(sa, sb, q, preds[i], size) + u_lambda * 0.1 * (abs(preds[i].x - o.x) + abs(preds[i].y - o.y));
++			float raw_sad = base_sad;
++			if (i != 0 && any(notEqual(preds[i], base)))
++				raw_sad = sad(sa, sb, q, preds[i], size);
++			float c = raw_sad + u_lambda * 0.1 * (abs(preds[i].x - o.x) + abs(preds[i].y - o.y));
+ 			if (c < best_cost) {
+ 				best_cost = c;
+ 				best = preds[i];
