@@ -14,7 +14,8 @@ int main(int argc, char **argv)
     uint8_t a[64*48*4], b[sizeof(a)], out[sizeof(a)];
     uint16_t field[16*12*4], stats[16] = {0};
     for (int i=0; i<64*48; i++) {
-        for (int c=0; c<3; c++) { a[4*i+c]=51; b[4*i+c]=77; }
+        a[4*i]=51; b[4*i]=77;
+        a[4*i+1] = a[4*i+2] = b[4*i+1] = b[4*i+2] = 0;
         a[4*i+3] = b[4*i+3] = 255;
     }
     for (int i=0; i<16*12; i++) {
