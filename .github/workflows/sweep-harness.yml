@@ -13,7 +13,7 @@ jobs:
         with:
           ref: 5f22938b55f9853f764e927c847d9c1a8d9a8c04
           path: baseline
-      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 libvulkan-dev glslang-tools
+      - run: timeout 90 sudo apt-get update || true; sudo apt-get install -y gcc-mingw-w64-x86-64 libvulkan-dev glslang-tools
       - name: Build Windows Vulkan corpus and shader variants
         run: |
           mkdir -p headers out/base
