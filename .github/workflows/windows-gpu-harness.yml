@@ -5,6 +5,21 @@ on:
 permissions:
   contents: read
 jobs:
+  verify-test-harness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y build-essential libvulkan-dev mesa-vulkan-drivers glslang-tools
+      - name: Build harness and shaders
+        run: make -C kedavra -j2 all
+      - name: Check pair border fixture and benchmark totals
+        run: |
+          set -o pipefail
+          export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name '*lvp*json' | head -1)
+          export LP_NUM_THREADS=2
+          kedavra/build/kfg_vktest --spv kedavra/build --scene border --per-phase
+          kedavra/build/kfg_vktest --spv kedavra/build --scene pan --bench 8 | tee bench.log
+          python3 kedavra/tools/check_benchmark_totals.py bench.log
   cross-build:
     runs-on: ubuntu-24.04
     steps:
