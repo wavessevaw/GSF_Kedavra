@@ -1151,10 +1151,28 @@ int main(int argc, char **argv)
 		uint32_t npass = 0;
 		int reps = bench > 512 ? 512 : bench;
 		const scene *s = &SCENES[2];
+		const char *bench_scene = getenv("KFG_BENCH_SCENE");
+		if (bench_scene) {
+			bool found = false;
+			for (size_t i = 0; i < sizeof(SCENES) / sizeof(SCENES[0]); i++) {
+				if (!strcmp(bench_scene, SCENES[i].name)) { s = &SCENES[i]; found = true; break; }
+			}
+			if (!found) { fprintf(stderr, "unknown benchmark scene: %s\n", bench_scene); return 2; }
+		}
+		printf("benchmark scene: %s\n", s->name);
 		render(s, 0.0, w, h, A);
 		render(s, 1.0, w, h, B);
 		kfg_vk_upload_rgba8(&vk, &e.color[0], A);
 		kfg_vk_upload_rgba8(&vk, &e.color[1], B);
+		// The benchmark may follow a different scene. Build A's pyramid for this
+		// pair and initialise the temporal seed before measuring any passes.
+		kfg_plan warm;
+		kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 1, 0, 0, 0, -1, &tune);
+		if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark pyramid init failed\n"); return 1; }
+		if (g_temporal) {
+			kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 0, 1, 0, 1, -1, &tune);
+			if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark temporal seed init failed\n"); return 1; }
+		}
 		for (int r = 0; r < reps + 3; r++) {
 			kfg_plan pa, g1, g2;
 			kfg_plan_analyze(&pa, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, g_temporal ? 0 : -1, &tune);
@@ -1185,7 +1203,8 @@ int main(int argc, char **argv)
 			qsort(samples[i], (size_t)reps, sizeof(double), cmp_double);
 			double med = samples[i][reps / 2] / 1e6, p99 = samples[i][(reps * 99) / 100] / 1e6;
 			printf("  %-12s %.3f (p99 %.3f)\n", labels[i], med, p99);
-			if (strncmp(labels[i], "g", 1))
+			// "global" is an analysis pass; only g1:/g2: belong to generated outputs.
+			if (strncmp(labels[i], "g1:", 3) && strncmp(labels[i], "g2:", 3))
 				analysis += med;
 			else
 				gen += med;
