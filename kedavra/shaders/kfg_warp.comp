@@ -26,6 +26,19 @@ vec4 tap_sharp(int slot, vec2 pos, ivec2 size)
 	vec2 o12 = w2 / w12;
 	vec2 inv = 1.0 / vec2(size);
 	vec2 p0 = (c - 1.0) * inv, p3 = (c + 2.0) * inv, p12 = (c + o12) * inv;
+	// Research variant: exact axis alignment eliminates zero-weight taps.
+	// The caller already bypasses this function when both coordinates are integral.
+	if (f.x == 0.0 || f.y == 0.0) {
+		vec2 lo = f.x == 0.0 ? vec2(p12.x, p0.y) : vec2(p0.x, p12.y);
+		vec2 hi = f.x == 0.0 ? vec2(p12.x, p3.y) : vec2(p3.x, p12.y);
+		float wl = f.x == 0.0 ? w0.y : w0.x;
+		float wm = f.x == 0.0 ? w12.y : w12.x;
+		float wh = f.x == 0.0 ? w3.y : w3.x;
+		vec4 axis = (textureLod(s_samplers[slot], lo, 0.0) * wl
+		           + textureLod(s_samplers[slot], p12, 0.0) * wm
+		           + textureLod(s_samplers[slot], hi, 0.0) * wh) / (wl + wm + wh);
+		return (u_flags & KFG_FLAG_SCRGB) != 0 ? axis : max(axis, vec4(0.0));
+	}
 	vec4 r = textureLod(s_samplers[slot], vec2(p12.x, p0.y), 0.0) * (w12.x * w0.y)
 	       + textureLod(s_samplers[slot], vec2(p0.x, p12.y), 0.0) * (w0.x * w12.y)
 	       + textureLod(s_samplers[slot], p12, 0.0) * (w12.x * w12.y)
