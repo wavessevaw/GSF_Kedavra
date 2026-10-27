@@ -29,19 +29,28 @@ jobs:
           done
       - name: Execute regression and image comparison
         run: |
+          set -o pipefail
           export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name '*lvp*json' | head -1)
           export LP_NUM_THREADS=2
           mkdir -p q1-results
           vulkaninfo --summary > q1-results/device.txt
           baseline/kedavra/build/test_pair_repair baseline/kedavra/build legacy > q1-results/contract-baseline.log 2>&1
           candidate/kedavra/build/test_pair_repair candidate/kedavra/build fixed > q1-results/contract-candidate.log 2>&1
-          if baseline/kedavra/build/test_pair_repair baseline/kedavra/build fixed > q1-results/contract-reproduction.log 2>&1; then
-            echo 'Baseline unexpectedly satisfies fixed contract'; exit 1
+          set +e
+          baseline/kedavra/build/test_pair_repair baseline/kedavra/build fixed > q1-results/contract-reproduction.log 2>&1
+          reproduction_status=$?
+          set -e
+          if [ "$reproduction_status" -ne 1 ]; then
+            echo "Expected a contract failure, got exit $reproduction_status"; exit 1
           fi
           python3 candidate/kedavra/tools/compare_pair_repair.py "$GITHUB_WORKSPACE" | tee q1-results/comparison.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pair-repair-evidence
-          path: q1-results/
+          path: |
+            q1-results/**/*.json
+            q1-results/**/*.log
+            q1-results/*.log
+            q1-results/device.txt
           retention-days: 14
