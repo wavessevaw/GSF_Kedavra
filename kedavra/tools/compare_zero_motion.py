@@ -60,6 +60,8 @@ for mode in ('default', 'lowbase', 'per-phase'):
 (report / 'comparison.json').write_text(json.dumps({'runs': results, 'changes': changes, 'images': image_changes}, indent=2))
 print(json.dumps({'exit_codes': {k: v['exit_code'] for k,v in results.items()}, 'changes': changes,
                   'largest_images': sorted(image_changes, key=lambda x: x['mean_abs_channel'], reverse=True)[:20]}, indent=2))
+if not image_changes or any(image['changed_pixels'] for image in image_changes):
+    raise SystemExit('Zero-motion optimization changed at least one output image')
 if any(results[v + '/' + m]['exit_code'] for v in ('baseline', 'candidate') for m in ('default', 'lowbase')):
     sys.exit(1)
 # The old per-phase path already fails the release's corpus. Demand exactly the
