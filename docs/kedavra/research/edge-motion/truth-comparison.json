@@ -1,0 +1,173 @@
+[
+  {
+    "scene": "near_object",
+    "frame": "near_object_t333_gen.ppm",
+    "changed_pixels": 15,
+    "improved_pixels": 8,
+    "worsened_pixels": 7,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 8273
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t500_gen.ppm",
+    "changed_pixels": 15,
+    "improved_pixels": 4,
+    "worsened_pixels": 11,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 12224
+  },
+  {
+    "scene": "near_object",
+    "frame": "near_object_t667_gen.ppm",
+    "changed_pixels": 11,
+    "improved_pixels": 5,
+    "worsened_pixels": 6,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 2592
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t333_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t500_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "objects_hud",
+    "frame": "objects_hud_t667_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t333_gen.ppm",
+    "changed_pixels": 37,
+    "improved_pixels": 5,
+    "worsened_pixels": 32,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 1884
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t500_gen.ppm",
+    "changed_pixels": 32,
+    "improved_pixels": 4,
+    "worsened_pixels": 28,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 4476
+  },
+  {
+    "scene": "occlusion",
+    "frame": "occlusion_t667_gen.ppm",
+    "changed_pixels": 11,
+    "improved_pixels": 4,
+    "worsened_pixels": 6,
+    "equal_error_pixels": 1,
+    "squared_error_delta": 2395
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t333_gen.ppm",
+    "changed_pixels": 146,
+    "improved_pixels": 46,
+    "worsened_pixels": 100,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 647756
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t500_gen.ppm",
+    "changed_pixels": 200,
+    "improved_pixels": 86,
+    "worsened_pixels": 114,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 500185
+  },
+  {
+    "scene": "pan",
+    "frame": "pan_t667_gen.ppm",
+    "changed_pixels": 234,
+    "improved_pixels": 91,
+    "worsened_pixels": 143,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 366118
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_seq_gen.ppm",
+    "changed_pixels": 69,
+    "improved_pixels": 40,
+    "worsened_pixels": 28,
+    "equal_error_pixels": 1,
+    "squared_error_delta": -218393
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t333_gen.ppm",
+    "changed_pixels": 114,
+    "improved_pixels": 26,
+    "worsened_pixels": 86,
+    "equal_error_pixels": 2,
+    "squared_error_delta": 410543
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t500_gen.ppm",
+    "changed_pixels": 143,
+    "improved_pixels": 48,
+    "worsened_pixels": 92,
+    "equal_error_pixels": 3,
+    "squared_error_delta": -128081
+  },
+  {
+    "scene": "stairs",
+    "frame": "stairs_t667_gen.ppm",
+    "changed_pixels": 77,
+    "improved_pixels": 27,
+    "worsened_pixels": 50,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 34523
+  },
+  {
+    "scene": "static",
+    "frame": "static_t333_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "static",
+    "frame": "static_t500_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  },
+  {
+    "scene": "static",
+    "frame": "static_t667_gen.ppm",
+    "changed_pixels": 0,
+    "improved_pixels": 0,
+    "worsened_pixels": 0,
+    "equal_error_pixels": 0,
+    "squared_error_delta": 0
+  }
+]

@@ -1,0 +1,306 @@
+[
+  {
+    "scene": "static",
+    "file": "static_t333_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "static",
+    "file": "static_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "static",
+    "file": "static_t500_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "static",
+    "file": "static_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "static",
+    "file": "static_t667_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "static",
+    "file": "static_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t333_gen.ppm",
+    "changed_pixels": 146,
+    "pixels": 1024000,
+    "max_channel_diff": 123,
+    "mean_channel_diff": 0.003947265625
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t500_gen.ppm",
+    "changed_pixels": 200,
+    "pixels": 1024000,
+    "max_channel_diff": 127,
+    "mean_channel_diff": 0.005910481770833333
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t667_gen.ppm",
+    "changed_pixels": 234,
+    "pixels": 1024000,
+    "max_channel_diff": 130,
+    "mean_channel_diff": 0.004360026041666667
+  },
+  {
+    "scene": "pan",
+    "file": "pan_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t333_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t500_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t667_gen.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "objects_hud",
+    "file": "objects_hud_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t333_gen.ppm",
+    "changed_pixels": 37,
+    "pixels": 1024000,
+    "max_channel_diff": 10,
+    "mean_channel_diff": 0.000115234375
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t500_gen.ppm",
+    "changed_pixels": 32,
+    "pixels": 1024000,
+    "max_channel_diff": 14,
+    "mean_channel_diff": 0.000146484375
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t667_gen.ppm",
+    "changed_pixels": 11,
+    "pixels": 1024000,
+    "max_channel_diff": 17,
+    "mean_channel_diff": 6.217447916666666e-05
+  },
+  {
+    "scene": "occlusion",
+    "file": "occlusion_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_seq_gen.ppm",
+    "changed_pixels": 69,
+    "pixels": 1024000,
+    "max_channel_diff": 141,
+    "mean_channel_diff": 0.0012522786458333333
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_seq_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t333_gen.ppm",
+    "changed_pixels": 114,
+    "pixels": 1024000,
+    "max_channel_diff": 218,
+    "mean_channel_diff": 0.0021572265625
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t500_gen.ppm",
+    "changed_pixels": 143,
+    "pixels": 1024000,
+    "max_channel_diff": 122,
+    "mean_channel_diff": 0.0026357421875
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t667_gen.ppm",
+    "changed_pixels": 77,
+    "pixels": 1024000,
+    "max_channel_diff": 84,
+    "mean_channel_diff": 0.0008004557291666667
+  },
+  {
+    "scene": "stairs",
+    "file": "stairs_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t333_gen.ppm",
+    "changed_pixels": 15,
+    "pixels": 1024000,
+    "max_channel_diff": 129,
+    "mean_channel_diff": 0.0005218098958333333
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t333_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t500_gen.ppm",
+    "changed_pixels": 15,
+    "pixels": 1024000,
+    "max_channel_diff": 116,
+    "mean_channel_diff": 0.00025455729166666666
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t500_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t667_gen.ppm",
+    "changed_pixels": 11,
+    "pixels": 1024000,
+    "max_channel_diff": 39,
+    "mean_channel_diff": 0.00011197916666666667
+  },
+  {
+    "scene": "near_object",
+    "file": "near_object_t667_truth.ppm",
+    "changed_pixels": 0,
+    "pixels": 1024000,
+    "max_channel_diff": 0,
+    "mean_channel_diff": 0.0
+  }
+]
