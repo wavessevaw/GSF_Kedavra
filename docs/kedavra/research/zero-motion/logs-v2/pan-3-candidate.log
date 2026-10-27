@@ -1,0 +1,24 @@
+device: AMD Radeon(TM) Graphics (AMD proprietary driver 26.10.1 (AMD proprietary shader compiler))
+pan          cut=0 bad=0.024 mc=0.0156 zero=0.1158 global=(24.0,8.0) grad=(0.0,0.0;0.0,0.0)
+  t=0.333 gen=33.41dB blend=17.23dB dup=16.22dB region gen/blend/dup=33.41/17.23/16.22 |G-A|=25.28 |G-B|=33.35 hud=0.00 PASS
+  t=0.667 gen=35.06dB blend=17.24dB dup=16.23dB region gen/blend/dup=35.06/17.24/16.23 |G-A|=33.41 |G-B|=25.33 hud=0.00 PASS
+  t=0.500 gen=33.63dB blend=16.58dB dup=15.09dB region gen/blend/dup=33.63/16.58/15.09 |G-A|=31.26 |G-B|=31.25 hud=0.00 PASS
+benchmark scene: pan
+benchmark (128 reps, AMD Radeon(TM) Graphics): median GPU ms per pass
+  reduce       0.124 (p99 0.136)
+  reduce       0.014 (p99 0.020)
+  reduce       0.008 (p99 0.010)
+  reduce       0.004 (p99 0.006)
+  me           1.129 (p99 1.169)
+  global       0.101 (p99 0.102)
+  me           1.223 (p99 1.257)
+  me           1.784 (p99 1.839)
+  stats        0.149 (p99 0.156)
+  select       1.323 (p99 1.400)
+  repair       0.092 (p99 0.100)
+  repair       0.081 (p99 0.086)
+  g1:warp      2.345 (p99 2.435)
+  g2:warp      2.298 (p99 2.398)
+  analysis 6.031 ms, two outputs 4.642 ms
+  per second at 90 Hz: x3 320.2 ms, x3.75 297.9 ms
+PASS: 0 failure(s)
