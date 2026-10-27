@@ -1160,6 +1160,15 @@ int main(int argc, char **argv)
 		render(s, 1.0, w, h, B);
 		kfg_vk_upload_rgba8(&vk, &e.color[0], A);
 		kfg_vk_upload_rgba8(&vk, &e.color[1], B);
+		// The preceding test may use a different scene. Build the current pair's
+		// A pyramid and a valid temporal seed before collecting timings.
+		kfg_plan warm;
+		kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 1, 0, 0, 0, -1, &tune);
+		if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark pyramid init failed\n"); return 1; }
+		if (g_temporal) {
+			kfg_plan_analyze(&warm, (uint32_t)w, (uint32_t)h, 0, 1, 0, 1, -1, &tune);
+			if (run_plan(&e, &warm, NULL, NULL)) { fprintf(stderr, "benchmark temporal seed init failed\n"); return 1; }
+		}
 		for (int r = 0; r < reps + 3; r++) {
 			kfg_plan pa, g1, g2;
 			kfg_plan_analyze(&pa, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, g_temporal ? 0 : -1, &tune);
