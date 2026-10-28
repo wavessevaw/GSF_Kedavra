@@ -38,7 +38,7 @@ namespace kfg
 {
 	static LogScope kfg_log( "kfg" );
 
-	gamescope::ConVar<int> cv_kfg_multiplier{ "kfg_multiplier", 0, "KEDAVRA frame generation: 0 = off, 1 = auto (x2 to x3 from the game's frame rate; to x3.75 with kfg_auto_floor), 2 = x2, 3 = x3." };
+	gamescope::ConVar<int> cv_kfg_multiplier{ "kfg_multiplier", 0, "KEDAVRA frame generation: 0 = off, 1 = auto (x2 to x3 from the game's frame rate), 2 = x2, 3 = x3." };
 	gamescope::ConVar<int> cv_kfg_base_fps{ "kfg_base_fps", 0, "KEDAVRA base frame cap: the game is limited to this many frames per second before generation fills the refresh (any value from 20 up; 0 = from kfg_multiplier). Needs kfg_multiplier != 0." };
 
 	// String convars are set by gamescopectl on the Wayland server thread while the
@@ -71,10 +71,19 @@ namespace kfg
 	// A controller sets kfg_multiplier, kfg_base_fps and kfg_post, then kfg_policy to a new
 	// revision; the status file echoes the revision with the values in force, so the
 	// controller knows its whole policy arrived.
-	gamescope::ConVar<int> cv_kfg_auto_floor{ "kfg_auto_floor", 0, "Lowest base cap Auto may use, in fps: 0 = refresh / 3 (x3, at least 30); down to 24 or refresh / 4, whichever is higher (90 Hz: 24, x3.75; 60 Hz: 24, x2.5; 120 Hz: 30, x4)." };
+	gamescope::ConVar<int> cv_kfg_auto_floor{ "kfg_auto_floor", 0, "Lowest base cap Auto may use, in fps: 0 = refresh / 3 (x3, at least 30); since GSF 1.5 never below refresh / 3 (at most two generated frames per real one)." };
 	gamescope::ConVar<int> cv_kfg_analysis_pixels{ "kfg_analysis_pixels", 1536 * 960, "Pixel count KEDAVRA's motion analysis works at: larger games (1080p, 4K) are analysed scaled down to it and only the final warp runs at their own size. 0 = always the game's own size." };
 	gamescope::ConVar<bool> cv_kfg_hold_vrr{ "kfg_hold_vrr", true, "With generation on (Auto or a fixed mode), keep the display at its fixed refresh rate: generated frames need a vblank grid, which adaptive sync (VRR) does not give." };
 	gamescope::ConVar<bool> cv_kfg_hdr{ "kfg_hdr", true, "Generate and filter HDR games too (HDR10 PQ and scRGB, in float frames). false = HDR games pass through untouched." };
+	gamescope::ConVar<int> cv_kfg_strict{ "kfg_strict", 1, "Honest multiplier: xN (N <= 3) shows exactly N - 1 generated frames between two real frames; vblanks left over hold a frame (1 = each generated frame on the vblank nearest its time, 2 = generated frames first and the last held, 3 = the real frame held; 0 = fill (Autopilot): every vblank filled, still at most two generated frames per real one)." };
+	gamescope::ConVar<int> cv_kfg_refresh{ "kfg_refresh", 1, "Steam Deck LCD only: the panel refresh follows the base while generation runs (refresh = multiplier x base, x2 at base 25: 50 Hz). 0 = never, 1 = to rates Steam offers, 2 = any rate in the panel's range. The OLED panel (above 60 Hz), Auto, external displays and VRR keep their refresh." };
+
+	// Refresh follows the base (kfg_refresh): what steamcompmgr told us about Steam's own frame
+	// limit and the panel. Written and read on the steamcompmgr thread.
+	static int g_nSteamFPSLimit = 0;
+	static int g_nPanelMinHz = 0, g_nPanelMaxHz = 0;
+	static bool g_bPanelInternal = false;
+	static int g_nWantedRefreshHz = 0;
 	gamescope::ConVar<int> cv_kfg_policy{ "kfg_policy", 0, "Policy revision of the controller that set the kfg convars, echoed in the status file." };
 
 	// Frames kept on the GPU. The scheduler may show content up to max_delay vblanks
@@ -162,6 +171,9 @@ namespace kfg
 		uint64_t ulTraceLatchID = 0;
 		int64_t nTraceLatchVBlank = 0, nTraceMeReady = 0;
 		uint32_t uTraceCapFps = 0, uTraceDecisions = 0;
+		// Status: scheduler counters at the previous status write (shown and generated frames
+		// per real frame over the last second).
+		uint64_t ulPrevReal = 0, ulPrevGen = 0, ulPrevRepeat = 0;
 
 		// Counters (status file).
 		uint64_t ulPaints = 0, ulApplied = 0, ulBypass = 0, ulRingMiss = 0, ulUnsupported = 0;
@@ -984,6 +996,12 @@ namespace kfg
 		if ( !f )
 			return;
 		const kfg_sched &q = s.sched;
+		// The multiplier as shown over the last second: outputs and generated frames per real one.
+		const uint64_t ulDReal = q.n_real - std::min( q.n_real, s.ulPrevReal );
+		const uint64_t ulDGen = q.n_gen - std::min( q.n_gen, s.ulPrevGen );
+		const uint64_t ulDRepeat = q.n_repeat - std::min( q.n_repeat, s.ulPrevRepeat );
+		const double flShownPerReal = ulDReal ? double( ulDReal + ulDGen + ulDRepeat ) / double( ulDReal ) : 0.0;
+		const double flGenPerReal = ulDReal ? double( ulDGen ) / double( ulDReal ) : 0.0;
 		std::string sTrace;
 		{
 			std::scoped_lock lock( g_TraceMutex );
@@ -1005,7 +1023,8 @@ namespace kfg
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ",\"analysis_one_pass\":%s,"
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,"
-			"\"real_missed\":%" PRIu64 ",\"jumps\":%" PRIu64 ",\"slowdowns\":%" PRIu64 ",\"speedups\":%" PRIu64 "}\n",
+			"\"real_missed\":%" PRIu64 ",\"jumps\":%" PRIu64 ",\"slowdowns\":%" PRIu64 ",\"speedups\":%" PRIu64 ","
+			"\"strict\":%d,\"shown_per_real\":%.2f,\"gen_per_real\":%.2f,\"refresh_wanted_hz\":%d,\"steam_fps_limit\":%d}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1024,7 +1043,11 @@ namespace kfg
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs, s.bAnalysisOnePass ? "true" : "false",
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
 			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight,
-			q.n_real_missed, q.n_jump, q.n_slow, q.n_fast );
+			q.n_real_missed, q.n_jump, q.n_slow, q.n_fast,
+			std::clamp( cv_kfg_strict.Get(), 0, 3 ), flShownPerReal, flGenPerReal, g_nWantedRefreshHz, g_nSteamFPSLimit );
+		s.ulPrevReal = q.n_real;
+		s.ulPrevGen = q.n_gen;
+		s.ulPrevRepeat = q.n_repeat;
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1036,13 +1059,65 @@ namespace kfg
 		return g_State.ulGridPeriod ? int( std::llround( 1e9 / double( g_State.ulGridPeriod ) ) ) : 90;
 	}
 
+
+	void SetSteamFPSLimit( int nFPS )
+	{
+		g_nSteamFPSLimit = nFPS > 0 ? nFPS : 0;
+	}
+
+	static bool StrictMode()
+	{
+		return cv_kfg_strict.Get() != 0;
+	}
+
+	// A refresh the internal panel can switch to for xN at base B (0: none).
+	static int PanelRefreshFor( int nMult, int nBase, std::span<const uint32_t> rates )
+	{
+		if ( nMult < 2 || nBase <= 0 || !g_bPanelInternal || cv_kfg_refresh.Get() <= 0 )
+			return 0;
+		const int nHz = nMult * nBase;
+		if ( nHz < g_nPanelMinHz || nHz > g_nPanelMaxHz )
+			return 0;
+		if ( cv_kfg_refresh.Get() == 1 && std::find( rates.begin(), rates.end(), uint32_t( nHz ) ) == rates.end() )
+			return 0;
+		return nHz;
+	}
+
+	int WantedRefreshHz( std::span<const uint32_t> rates, bool bInternal )
+	{
+		// Only the LCD panel (40-60 Hz) switches: the OLED stays at its refresh (user rule).
+		g_bPanelInternal = bInternal && !rates.empty() && rates.back() <= 60;
+		g_nPanelMinHz = rates.empty() ? 0 : int( rates.front() );
+		g_nPanelMaxHz = rates.empty() ? 0 : int( rates.back() );
+		g_nWantedRefreshHz = 0;
+		const int n = cv_kfg_multiplier.Get();
+		const int nBase = cv_kfg_base_fps.Get();
+		if ( n == 2 || n == 3 )
+		{
+			// x2/x3 at Steam's frame limit (x2 at a 30 fps limit: 60 Hz). Without a limit the
+			// refresh stays where Steam has it and the base is refresh / N.
+			g_nWantedRefreshHz = PanelRefreshFor( n, g_nSteamFPSLimit, rates );
+		}
+		else if ( n == 1 && nBase > 0 && g_nPanelMaxHz > 0 )
+		{
+			// Custom base: the largest whole multiplier whose N x base the panel can show
+			// (35: x2 at 70 Hz; 30: x3 at 90 Hz; 24: x3 at 72 Hz). Auto keeps the refresh.
+			const int nMult = std::min( int( KFG_MAX_GEN_PER_REAL ) + 1, g_nPanelMaxHz / nBase );
+			g_nWantedRefreshHz = PanelRefreshFor( nMult, nBase, rates );
+		}
+		return g_nWantedRefreshHz;
+	}
+
 	// Fixed base cap from kfg_base_fps (Custom), clamped to what generation can fill; 0 = none.
 	static int ManualBaseFPS( int nRefreshHz )
 	{
 		const int nBase = cv_kfg_base_fps.Get();
 		if ( cv_kfg_multiplier.Get() == 0 || nBase <= 0 || nRefreshHz <= 0 )
 			return 0;
-		const int nMin = ( nRefreshHz + int( KFG_MAX_MULTIPLIER ) - 1 ) / int( KFG_MAX_MULTIPLIER );
+		// At most two generated frames per real one (kfg_sched.h KFG_MAX_GEN_PER_REAL): the
+		// base is at least refresh / 3.
+		const int nMaxN = int( KFG_MAX_GEN_PER_REAL ) + 1;
+		const int nMin = ( nRefreshHz + nMaxN - 1 ) / nMaxN;
 		return std::clamp( nBase, std::max( 20, nMin ), nRefreshHz );
 	}
 
@@ -1050,7 +1125,19 @@ namespace kfg
 	static int BaseCapFPS( int nRefreshHz )
 	{
 		if ( const int nBase = ManualBaseFPS( nRefreshHz ) )
+		{
+			// Honest multiplier: a whole number of vblanks per source frame (refresh / N),
+			// which is the base itself once the refresh follows it.
+			// Strict mode keeps a fractional base (35 at 90 Hz: 2.57): its 2- and 3-vblank
+			// intervals get one and two generated frames, never three (kfg_sched.h).
 			return nBase;
+		}
+		const int n = cv_kfg_multiplier.Get();
+		// Strict x2/x3 under Steam's own lower frame limit: the base is that limit (x2 at 35 on
+		// the 90 Hz OLED: 70 frames a second, frames held; on the LCD until the panel follows).
+		if ( StrictMode() && ( n == 2 || n == 3 ) && g_nSteamFPSLimit > 0 && nRefreshHz > 0 &&
+		     g_nSteamFPSLimit < nRefreshHz / n )
+			return g_nSteamFPSLimit;
 		if ( cv_kfg_multiplier.Get() == 1 && g_State.bAutoInit && nRefreshHz > 0 )
 			return std::min( int( g_State.autoc.cap ), nRefreshHz );
 		return 0;
@@ -1060,14 +1147,16 @@ namespace kfg
 	{
 		const int n = cv_kfg_multiplier.Get();
 		const int nHz = RefreshHz();
+		if ( StrictMode() && ( n == 2 || n == 3 ) )
+			return uint32_t( n );  // xN is N, whatever the base
 		if ( const int nBase = BaseCapFPS( nHz ) )
 		{
 			// Longest source interval in vblanks: 40 at 90 Hz alternates 2 and 3, so 3. A cap
-			// at the refresh rate needs no generation.
-			return nBase >= nHz ? 1u : uint32_t( ( nHz + nBase - 1 ) / nBase );
+			// at the refresh rate needs no generation. Never above x3 (two generated frames).
+			return nBase >= nHz ? 1u : std::min( KFG_MAX_GEN_PER_REAL + 1u, uint32_t( ( nHz + nBase - 1 ) / nBase ) );
 		}
 		if ( n == 1 )
-			return g_State.bAutoInit ? g_State.autoc.mult : 3u;
+			return g_State.bAutoInit ? std::min( KFG_MAX_GEN_PER_REAL + 1u, g_State.autoc.mult ) : 3u;
 		return ( n == 2 || n == 3 ) ? uint32_t( n ) : 1u;
 	}
 
@@ -1167,6 +1256,7 @@ namespace kfg
 		}
 		// The base cap's release pattern (40 at 90 Hz: 2, 2, 2, 3 vblanks); unchanged caps are a no-op.
 		kfg_sched_set_cadence( &s.sched, uint32_t( RefreshHz() ), uint32_t( BaseCapFPS( RefreshHz() ) ) );
+		kfg_sched_set_strict( &s.sched, uint32_t( std::clamp( cv_kfg_strict.Get(), 0, 3 ) ) );
 		if ( uMult == 1 && s.sched.state == KFG_STATE_OFF )
 		{
 			// Fully off: drop the ring so an idle feature costs no memory.

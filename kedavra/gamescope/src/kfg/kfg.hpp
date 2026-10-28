@@ -19,6 +19,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 struct FrameInfo_t;
 struct kfg_params;
@@ -50,4 +51,11 @@ namespace kfg
 
 	// rendervulkan.cpp: uploads pass constants (CVulkanCmdBuffer::uploadConstants lives there).
 	void UploadParams( CVulkanCmdBuffer *pCmd, const kfg_params &params );
+
+	// steamcompmgr: Steam's own frame limit (GAMESCOPE_FPS_LIMIT, 0 = none), each loop.
+	void SetSteamFPSLimit( int nFPS );
+	// steamcompmgr paint_all: the refresh generation wants on the Steam Deck LCD (kfg_refresh:
+	// multiplier x base, from the panel's rates), 0 = leave Steam's choice. The OLED, external
+	// displays and VRR are never switched.
+	int WantedRefreshHz( std::span<const uint32_t> rates, bool bInternal );
 }
