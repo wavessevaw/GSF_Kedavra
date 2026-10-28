@@ -163,7 +163,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	FILE *src = p.source_path ? fopen(p.source_path, "w") : NULL;
-	fprintf(trace, "vblank,flip_ns,kind,src_a,src_b,phase_num,phase_den,content,delay,reason,state,refresh_ns,mult,compose_late,skipped,pos\n");
+	fprintf(trace, "vblank,flip_ns,kind,src_a,src_b,phase_num,phase_den,content,delay,reason,state,refresh_ns,mult,compose_late,skipped,pos,latch_id,latch_vblank,me_ready,cap_fps,decisions\n");
 	if (src)
 		fprintf(src, "id,done_ns,latch_vblank,latch_ns\n");
 
@@ -255,8 +255,11 @@ int main(int argc, char **argv)
 			const bool slot_free = last_latch < 0 || (k * T) / R > (last_latch * T) / R;
 			released = slot_free && (p.aligned <= 0 || (k * T) / R != ((k - 1) * T) / R);
 		}
+		uint64_t latch_id = 0;
+		int64_t latch_me = 0;
 		if (g.queued_done && released) {
 			kfg_sched_on_latch(&s, g.queued_id, k);
+			latch_id = g.queued_id;
 			last_latch = k;
 			if (src)
 				fprintf(src, "%" PRIu64 ",%.0f,%" PRId64 ",%.0f\n", g.queued_id, g.queued_done_ns, k, wake_ns);
@@ -268,6 +271,7 @@ int main(int argc, char **argv)
 			while (grid_origin + (double)(ready_k - grid_base) * refresh_ns - p.redzone_ms * 1e6 < ready_ns)
 				ready_k++;
 			kfg_sched_on_me(&s, g.queued_id, ready_k, true, rng_unit(&r) < p.cut_prob);
+			latch_me = ready_k;
 			g.queued_done = false;
 			// Pipelined: the frame behind it is already rendering (it queues on the next wake).
 			if (p.pipelined <= 0) {
@@ -286,6 +290,7 @@ int main(int argc, char **argv)
 
 		kfg_decision d;
 		bool late_now = false;
+		int decided = 0;  // the scheduler decided at this vblank (not on a late composition's re-show)
 		if (pending_late) {
 			// The previous composition missed vblank k-1 and lands on this vblank instead;
 			// the compositor does not paint a new frame for this wakeup.
@@ -293,6 +298,7 @@ int main(int argc, char **argv)
 			pending_late = false;
 		} else {
 			d = kfg_sched_decide(&s, k);
+			decided = 1;
 			double c = rng_lognormal(&r, p.compose_ms, p.compose_p99_ms) * 1e6;
 			if (d.show == KFG_SHOW_GEN)
 				c += p.warp_ms * 1e6;
@@ -302,13 +308,17 @@ int main(int argc, char **argv)
 				late_dec = d;
 			}
 		}
+		// Replay columns (kfg_replay.py): the source latched at this vblank and its analysis.
+		char tail[128];
+		snprintf(tail, sizeof(tail), "%" PRIu64 ",%" PRId64 ",%" PRId64 ",%u,%d", latch_id, latch_id ? k : (int64_t)0, latch_me,
+			p.cap_fps > 0 ? (unsigned)llround(p.cap_fps) : 0u, decided);
 		if (late_now) {
-			fprintf(trace, "%" PRId64 ",%.0f,repeat,0,0,0,0,%" PRId64 ",%" PRId64 ",compose_late,%s,%.0f,%u,1,0,%.3f\n",
-				k, vbl_ns, d.content, d.delay, kfg_state_name(d.state), refresh_ns, mult, (double)d.pos / KFG_SCHED_SUB);
+			fprintf(trace, "%" PRId64 ",%.0f,repeat,0,0,0,0,%" PRId64 ",%" PRId64 ",compose_late,%s,%.0f,%u,1,0,%.3f,%s\n",
+				k, vbl_ns, d.content, d.delay, kfg_state_name(d.state), refresh_ns, mult, (double)d.pos / KFG_SCHED_SUB, tail);
 		} else if (d.show != KFG_SHOW_NONE) {
-			fprintf(trace, "%" PRId64 ",%.0f,%s,%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRId64 ",%" PRId64 ",%s,%s,%.0f,%u,0,%d,%.3f\n",
+			fprintf(trace, "%" PRId64 ",%.0f,%s,%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRId64 ",%" PRId64 ",%s,%s,%.0f,%u,0,%d,%.3f,%s\n",
 				k, vbl_ns, kfg_show_name(d.show), d.src_a, d.src_b, d.phase_num, d.phase_den, d.content, d.delay,
-				kfg_reason_name(d.reason), kfg_state_name(d.state), refresh_ns, mult, d.skipped ? 1 : 0, (double)d.pos / KFG_SCHED_SUB);
+				kfg_reason_name(d.reason), kfg_state_name(d.state), refresh_ns, mult, d.skipped ? 1 : 0, (double)d.pos / KFG_SCHED_SUB, tail);
 		}
 		k++;
 	}

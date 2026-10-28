@@ -15,7 +15,7 @@ PYTHON ?= python3
 SHADERS = kfg_copy kfg_reduce kfg_me kfg_stats kfg_select kfg_warp kfg_post kfg_smaa_edge kfg_smaa_weight kfg_smaa_blend
 SPV = $(SHADERS:%=$(BUILD)/%.spv)
 
-all: $(BUILD)/kfg_sim $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
+all: $(BUILD)/kfg_sim $(BUILD)/kfg_replay $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -25,6 +25,9 @@ $(BUILD)/%.spv: shaders/%.comp shaders/kfg_common.glsl shaders/kfg_smaa.glsl sha
 
 $(BUILD)/kfg_sim: sched/kfg_sim.c sched/kfg_sched.h | $(BUILD)
 	$(CC) $(CFLAGS) $(WARN) -std=c11 -o $@ sched/kfg_sim.c -lm
+
+$(BUILD)/kfg_replay: sched/kfg_replay.c sched/kfg_sched.h | $(BUILD)
+	$(CC) $(CFLAGS) $(WARN) -std=c11 -o $@ sched/kfg_replay.c
 
 $(BUILD)/test_sched: sched/test_sched.c sched/kfg_sched.h | $(BUILD)
 	$(CC) -O1 -g -fsanitize=address,undefined $(WARN) -std=c11 -o $@ sched/test_sched.c

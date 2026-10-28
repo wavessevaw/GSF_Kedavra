@@ -143,7 +143,8 @@ def analyze(rows, sources=None, skip_s=2.0, exclude=(), expect_mult=None, only_a
     # Recurring short/long alternation: consecutive deviations of opposite sign above 1 ms.
     osc = sum(1 for x, y in zip(devs, devs[1:]) if abs(x) > 1.0 and abs(y) > 1.0 and x * y < 0)
 
-    # Temporal order: content index of new frames strictly increases.
+    # Temporal order: the content position of new frames strictly increases.
+    has_pos = all(r.get("pos") not in (None, "") for r in new)
     reorders = 0
     steps = Counter()
     prev = None
@@ -154,7 +155,10 @@ def analyze(rows, sources=None, skip_s=2.0, exclude=(), expect_mult=None, only_a
             prev = None
         prev_segment = segment[id(r)]
         if prev is not None:
-            if c <= prev:
+            # Sub-vblank positions (pos column): a new frame must move forward. Whole content
+            # indices only (traces without pos): a slowed step keeps the same index, so only a
+            # step back is a reorder.
+            if c < prev or (c == prev and has_pos):
                 reorders += 1
             # A silk catch-up step (1.25 or 1.5 vblanks of content) counts as one step.
             steps[int(math.floor(c - prev + 0.25))] += 1

@@ -50,10 +50,22 @@ extern "C" {
 
 #define KFG_SCHED_RING 16u
 #define KFG_MAX_MULTIPLIER 4u
-#define KFG_SCHED_SUB 8      // content sub-steps per vblank (catch-up granularity)
-#define KFG_CATCH_STEP 2     // catch-up: +2/8 vblank of content per output (1.25x) ...
-#define KFG_CATCH_FAST 4     // ... +4/8 (1.5x) while more than KFG_CATCH_FAR vblanks behind
-#define KFG_CATCH_FAR 4
+#define KFG_SCHED_SUB 8      // content sub-steps per vblank (speed-change granularity)
+#ifndef KFG_FAST_DEBT
+#define KFG_FAST_DEBT 3      // owed vblanks from which a catch-up may run at 1.75x instead of 1.5x
+#endif
+#ifndef KFG_JUMP_DEBT
+#define KFG_JUMP_DEBT 7      // owed vblanks from which the display jumps back to its steady delay
+#endif
+#ifndef KFG_SLOW_MIN
+#define KFG_SLOW_MIN 4       // slowest slow-down: 1/4 speed
+#endif
+#ifndef KFG_RESYNC_HARD
+#define KFG_RESYNC_HARD 2    // resynchronise at this many max_delay behind whatever the cause
+#endif
+#ifndef KFG_REANCHOR
+#define KFG_REANCHOR 1       // vblanks of delay a slow-down episode may add to the steady delay
+#endif
 
 enum kfg_show {
 	KFG_SHOW_NONE = 0,  // nothing latched yet
@@ -145,9 +157,15 @@ typedef struct kfg_sched {
 	int64_t fail_k;            // last vblank a give-back near wall_floor ran short
 	uint32_t giveback_wait;    // calm vblanks needed before a give-back near wall_floor
 	int64_t wall_floor;        // lowest steady delay reached since the cadence was set up
+	int64_t episode_ref;       // steady delay when the current slow-down/repeat episode began
+	bool episode_overdue;      // ... and a source was overdue during it
+	uint64_t plan_id;          // target real frame of a catch-up across a short interval (0: the next one)
 	// Counters for telemetry.
 	uint64_t n_real, n_gen, n_repeat, n_skip, n_resync, n_degrade, n_catchup;
 	uint64_t n_repeat_reason[5];
+	uint64_t n_slow, n_fast;      // outputs that advanced content less / more than one vblank
+	uint64_t n_jump;              // outputs that advanced content two vblanks or more (resyncs included)
+	uint64_t n_real_missed;       // source frames the content passed without showing them
 } kfg_sched;
 
 static inline kfg_sched_config kfg_sched_default_config(uint32_t multiplier)
@@ -194,6 +212,23 @@ static inline const kfg_source_slot *kfg_sched_slot(const kfg_sched *s, uint32_t
 	return &s->ring[(s->head + KFG_SCHED_RING - 1u - back) % KFG_SCHED_RING];
 }
 
+// Longest gap between consecutive sources after content position c (vblanks): a single
+// interval longer than max_delay is a stall that a resynchronisation should skip.
+static inline int64_t kfg_sched_stall_gap(const kfg_sched *s, int64_t c)
+{
+	int64_t gap = 0;
+	for (uint32_t i = 0; i + 1 < s->count; i++) {
+		const kfg_source_slot *b = kfg_sched_slot(s, i), *a = kfg_sched_slot(s, i + 1);
+		if (b->t - a->t > gap)
+			gap = b->t - a->t;
+		if (a->t <= c)
+			break;
+	}
+	if (s->count == 1)
+		gap = INT64_MAX / 4;  // nothing to play towards it
+	return gap;
+}
+
 static inline kfg_source_slot *kfg_sched_find(kfg_sched *s, uint64_t id)
 {
 	for (uint32_t i = 0; i < s->count; i++) {
@@ -220,6 +255,7 @@ static inline void kfg_sched_reset_history(kfg_sched *s)
 	s->warming = true;
 	s->interval_avg16 = 0;
 	s->catchup = 0;
+	s->plan_id = 0;
 }
 
 static inline uint32_t kfg_sched_gcd(uint32_t a, uint32_t b);
@@ -356,6 +392,7 @@ static inline void kfg_sched_set_multiplier(kfg_sched *s, uint32_t multiplier)
 	s->giveback_k = INT64_MIN / 2;
 	s->warming = true;
 	s->catchup = 0;
+	s->plan_id = 0;
 }
 
 // Locate the source interval containing content position c.
@@ -436,18 +473,10 @@ static inline kfg_candidate kfg_sched_eval_pos(const kfg_sched *s, int64_t p, in
 		r.src_a = (2 * off < span_q) ? a->id : b->id;
 		return r;
 	}
-	const uint32_t n = s->cfg.multiplier;
-	uint32_t num = (uint32_t)off, den = (uint32_t)span_q;
-	if (span > (int64_t)n && span > (int64_t)s->cfg.max_fill_span) {
-		// Interval longer than the multiplier can fill: quantise to multiples of 1/n.
-		const uint32_t j = (uint32_t)((off * (int64_t)n + span_q / 2) / span_q);
-		if (j == 0 || j >= n) {
-			r.reason = KFG_REPEAT_CADENCE;
-			return r;
-		}
-		num = j;
-		den = n;
-	}
+	// Every interval is filled at the content position, long ones too (GSF 1.4.5: the plan
+	// decides how many outputs an interval gets, so a long interval after a stall is crossed
+	// evenly instead of in steps of 1/multiplier with repeats between them).
+	const uint32_t num = (uint32_t)off, den = (uint32_t)span_q;
 	const uint32_t g = kfg_sched_gcd(num, den);
 	r.ok = true;
 	r.show = KFG_SHOW_GEN;
@@ -464,18 +493,9 @@ static inline kfg_candidate kfg_sched_eval(const kfg_sched *s, int64_t c, int64_
 	return kfg_sched_eval_pos(s, c * KFG_SCHED_SUB, k);
 }
 
-// Silk look-ahead: the largest content step (1/SUB vblank) for this output after which normal
-// steps stay within what will be ready on each of the next vblanks, assuming no new source
-// before the game's cadence brings one (the next vblank when it is already overdue); *spread is
-// the even step that reaches the same point. INT64_MAX: no limit known (no cadence yet).
-static inline int64_t kfg_sched_lookahead(const kfg_sched *s, int64_t k, int64_t base, int64_t *spread)
+// The analysis lag the last pairs actually had (the budget while none is known yet).
+static inline int64_t kfg_sched_lag(const kfg_sched *s)
 {
-	const kfg_source_slot *newest = kfg_sched_slot(s, 0);
-	*spread = INT64_MAX;
-	if (!newest || s->interval_avg16 <= 0 || s->count < 2)
-		return INT64_MAX;
-	const int64_t Q = KFG_SCHED_SUB;
-	// The analysis lag the last pairs actually had (the budget while none is known yet).
 	int64_t lag = (int64_t)s->cfg.me_lag_budget;
 	for (uint32_t back = 0; back < s->count && back < 4; back++) {
 		const kfg_source_slot *slot = kfg_sched_slot(s, back);
@@ -484,44 +504,129 @@ static inline int64_t kfg_sched_lookahead(const kfg_sched *s, int64_t k, int64_t
 			break;
 		}
 	}
-	if (lag < 0)
-		lag = 0;
-	// The next source where the cap's cadence puts it (a fractional cap's own gap, not the mean).
-	const int64_t gap = kfg_sched_next_gap(s);
-	// From the cadence grid (a late latch snapped back onto it does not delay the next one).
-	int64_t next_latch = (newest->t < newest->latch ? newest->t : newest->latch) + gap;
-	if (next_latch <= k)
-		next_latch = k + 1;  // overdue: the earliest it can still come
-	const int64_t next_t = newest->t + gap;
-	const int64_t next_ready = next_latch + lag;
-	int64_t best = INT64_MAX;
-	// The horizon only moves forward: visit each retained pair once, rather than
-	// rescanning the entire ring for every predicted output.
-	int back = (int)s->count - 1;
-	int64_t r = kfg_sched_slot(s, (uint32_t)back)->t;
-	back--;
-	for (int64_t i = 1; i <= lag + 3; i++) {
-		const int64_t j = k + i - 1;  // the vblank of the i-th output from now
-		// Content showable at vblank j: up to the newest source whose pair is analysed by then.
-		while (back >= 0) {
-			const kfg_source_slot *slot = kfg_sched_slot(s, (uint32_t)back);
-			const int64_t ready = slot->me_ready != INT64_MAX ? slot->me_ready : slot->latch + lag;
-			if (ready > j)
-				break;
-			r = slot->t;
-			back--;
-		}
-		const int64_t available = r == newest->t && next_ready <= j ? next_t : r;
-		// This step followed by normal ones stays within what is ready ...
-		const int64_t now = available * Q - base - (i - 1) * Q;
-		if (now < best)
-			best = now;
-		// ... and the deficit spread evenly over the vblanks until then.
-		const int64_t even = (available * Q - base) / i;
-		if (even < *spread)
-			*spread = even;
+	return lag < 0 ? 0 : lag;
+}
+
+// First vblank whose output may show content after the source `back` (the vblank its pair with
+// the next source is analysed): known once that source is latched; for the newest, the next
+// source where the cap's cadence puts it (from the cadence grid, so a late latch snapped back
+// onto it does not delay the next one; the next vblank when it is already overdue).
+static inline int64_t kfg_sched_after_ready(const kfg_sched *s, int64_t k, int back)
+{
+	const int64_t lag = kfg_sched_lag(s);
+	if (back > 0) {
+		const kfg_source_slot *c = kfg_sched_slot(s, (uint32_t)back - 1u);
+		return c->me_ready != INT64_MAX ? c->me_ready : c->latch + lag;
 	}
-	return best;
+	const kfg_source_slot *newest = kfg_sched_slot(s, 0);
+	int64_t next_latch = (newest->t < newest->latch ? newest->t : newest->latch) + kfg_sched_next_gap(s);
+	if (next_latch <= k)
+		next_latch = k + 1;
+	return next_latch + lag;
+}
+
+enum { KFG_PLAN_NORMAL = 0, KFG_PLAN_FAST, KFG_PLAN_SLOW };
+
+// Silk 2 (GSF 1.4.5): the content position of this output. The content runs from real frame to
+// real frame: each output covers an even share of what is left to the next real frame, over the
+// number of outputs the plan gives it. Normally that is one output per vblank of content; to
+// pay back delay (after a give-back or a stall) one output less per interval, at most 1.5x;
+// before a source that will not be analysed in time, more, at least 1/4x. A real frame
+// therefore always lands exactly on a vblank, and a speed change spans whole intervals instead
+// of leaving the content between vblanks. Intervals of two vblanks or less cannot be shortened
+// at 1.5x: the catch-up then spans the next interval as well (the real frame between them is
+// passed). `back` is the ring index of the interval's earlier endpoint (> 0).
+static inline int64_t kfg_sched_plan(const kfg_sched *s, int64_t k, int64_t base, int *target, bool span, int *mode, bool *held)
+{
+	const int64_t Q = KFG_SCHED_SUB;
+	*mode = KFG_PLAN_NORMAL;
+	*held = false;
+	int tb = *target;  // the target real frame
+	const kfg_source_slot *b = kfg_sched_slot(s, (uint32_t)tb);
+	int64_t D = b->t * Q - base;
+	int64_t normal = k - 1 + (D + Q - 1) / Q;  // vblank at which b is shown at normal speed
+	int64_t arrive = normal;
+	int64_t want = INT64_MAX;
+	if (s->wall_ref >= 0) {
+		want = b->t + s->wall_ref;  // where the steady delay shows b
+		if (span && want < normal && k - 1 + (2 * D + 3 * Q - 1) / (3 * Q) >= normal && tb > 0) {
+			// Too short to shorten: catch up over this and the next interval.
+			const kfg_source_slot *b2 = kfg_sched_slot(s, (uint32_t)tb - 1u);
+			const int64_t D2 = b2->t * Q - base;
+			const int64_t normal2 = k - 1 + (D2 + Q - 1) / Q;
+			const int64_t lo2 = k - 1 + (2 * D2 + 3 * Q - 1) / (3 * Q);
+			int64_t arrive2 = b2->t + s->wall_ref;
+			if (arrive2 < lo2)
+				arrive2 = lo2;
+			// The pair after b must be analysed when the content passes b.
+			const int64_t m2 = arrive2 - k + 1;
+			const int64_t pass = k + (D * m2) / D2;  // vblank of the first output past b
+			if (arrive2 < normal2 && b2->me_ready <= pass && kfg_sched_after_ready(s, k, tb - 1) - 1 <= arrive2) {
+				tb--;
+				b = b2;
+				D = D2;
+				normal = normal2;
+				arrive = normal2;
+				want = arrive2;
+			}
+		}
+		if (want < arrive) {
+			// 1.5x; up to 1.75x while the display owes KFG_FAST_DEBT vblanks or more (after a
+			// game stall), so a long debt costs fewer sped-up outputs.
+			const int64_t num = normal - want >= KFG_FAST_DEBT ? 7 : 6;
+			const int64_t lo = k - 1 + (4 * D + num * Q - 1) / (num * Q);
+			arrive = want > lo ? want : lo;
+		}
+	}
+	if (want != INT64_MAX && normal - want >= KFG_JUMP_DEBT && want >= k) {
+		// A long game stall: one jump to where the steady delay shows b, then normal steps.
+		*mode = KFG_PLAN_FAST;
+		*target = tb;
+		const int64_t p = b->t * Q - (want - k) * Q;
+		return p > base + Q ? p : base + Q;
+	}
+	// Content past b needs the next pair analysed: arrive no earlier than the vblank before.
+	const int64_t ready = kfg_sched_after_ready(s, k, tb) - 1;
+	if (arrive < ready) {
+		int64_t hi = k - 1 + (KFG_SLOW_MIN * D) / Q;  // the slowest speed, 1/KFG_SLOW_MIN
+		if (hi < normal)
+			hi = normal;
+		arrive = ready < hi ? ready : hi;
+		if (want < normal)
+			*held = true;  // the catch-up waits for the source
+	}
+	*target = tb;
+	if (arrive < k)
+		arrive = k;
+	if (arrive < normal)
+		*mode = KFG_PLAN_FAST;
+	else if (arrive > normal)
+		*mode = KFG_PLAN_SLOW;
+	const int64_t m = arrive - k + 1;
+	int64_t step = (2 * D + m) / (2 * m);  // D / m, rounded; the last output lands exactly on b
+	if (step < 1)
+		step = 1;
+	if (step > D)
+		step = D;
+	return base + step;
+}
+
+// Telemetry: whole-vblank jumps and real frames the content passed without showing them.
+static inline void kfg_sched_count_pass(kfg_sched *s, const kfg_decision *d, int64_t from, int64_t to)
+{
+	const int64_t Q = KFG_SCHED_SUB;
+	if (to <= from)
+		return;
+	if (to - from >= 2 * Q)
+		s->n_jump++;
+	for (uint32_t back = 0; back < s->count; back++) {
+		const kfg_source_slot *slot = kfg_sched_slot(s, back);
+		const int64_t at = slot->t * Q;
+		if (at <= from)
+			break;
+		if (at < to || (at == to && !(d->show == KFG_SHOW_REAL && d->src_a == slot->id)))
+			s->n_real_missed++;
+	}
 }
 
 // Decide the output for vblank k (strictly increasing between calls).
@@ -593,13 +698,20 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 
 	d.state = KFG_STATE_ACTIVE;
 	const int64_t Q = KFG_SCHED_SUB;
-	if (s->content == INT64_MIN) {
+	const bool first = s->content == INT64_MIN;
+	if (first) {
 		s->content = newest->t - 1; // first output shows the newest frame
 		s->frac = 0;
 	}
 
-	// Too far behind (long stall, suspend): resynchronise forward.
-	if (newest->t - s->content > (int64_t)s->cfg.max_delay) {
+	const int64_t p_before = s->content * Q + (int64_t)s->frac;  // for the telemetry counters
+	// Too far behind after a long stall (suspend, loading: one source interval longer than
+	// max_delay), or hopelessly behind (twice max_delay): resynchronise forward. A shorter
+	// hitch (a long game frame, late analysis) is paid back by the plan's catch-up instead:
+	// a resynchronisation skips everything between the shown content and the newest frame.
+	if (newest->t - s->content > (int64_t)s->cfg.max_delay &&
+	    (newest->t - s->content > KFG_RESYNC_HARD * (int64_t)s->cfg.max_delay ||
+	     kfg_sched_stall_gap(s, s->content) > (int64_t)s->cfg.max_delay)) {
 		s->content = newest->t - 1;
 		s->frac = 0;
 		s->catchup = 0;
@@ -609,84 +721,107 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		s->wall_floor = 0;
 		s->giveback_k = INT64_MIN / 2;
 		s->warming = true;
+		s->plan_id = 0;
 		s->n_resync++;
 		d.skipped = true;
 	}
 
 	const int64_t base = s->content * Q + (int64_t)s->frac;
-	// What the display owes the wall clock. When it fell further behind than its established
-	// cadence (it waited for a late source or analysis, or a late flip displaced one decision),
-	// it catches up by running the content slightly faster for a few vblanks (silk catch-up)
-	// instead of jumping to where the steady cadence is now: a brief speed-up, not a skip.
-	if (s->wall_ref >= 0 && !s->warming) {
-		const int64_t behind = (k - s->wall_ref) * Q - (base + Q);
-		if (behind > s->catchup)
-			s->catchup = behind;
-	}
-	int64_t extra = 0;
-	if (s->catchup > 0) {
-		extra = s->catchup > (int64_t)KFG_CATCH_FAR * Q ? KFG_CATCH_FAST : KFG_CATCH_STEP;
-		if (extra > s->catchup)
-			extra = s->catchup;
-	}
-	int64_t step = Q + extra;
-	// Silk slow-down: look a few vblanks ahead at the content that will be ready to show (the
-	// pairs analysed by then, at the lag the last pairs had, and the next source where the
-	// game's own cadence puts it, or on the next vblank when it is already overdue). A catch-up
-	// takes only the room this leaves; when the display would run into a freeze on the way, it
-	// spreads the shortfall evenly (quarter speed at the most) and the catch-up pays the slower
-	// vblanks back once the source is there.
-	int64_t spread;
-	bool slowed = false;
-	const int64_t limit = kfg_sched_lookahead(s, k, base, &spread);
+	// Silk 2: the content moves from real frame to real frame (kfg_sched_plan); a slow-down,
+	// a catch-up and a give-back change how many outputs an interval gets, never where a real
+	// frame lands.
 	// The next source is overdue on the cap's cadence: a slow-down now is the game's, not a
 	// give-back that went too far.
-	const bool overdue = newest && (newest->t < newest->latch ? newest->t : newest->latch) + kfg_sched_next_gap(s) <= k;
-	if (!s->warming && limit < step) {
-		const int64_t want = limit >= Q ? limit : spread;
-		step = want < Q / 4 ? Q / 4 : want;
-		if (step > Q + extra)
-			step = Q + extra;
-		extra = step > Q ? step - Q : 0;
-		if (step < Q) {
-			d.catchup = true;
-			s->n_catchup++;
-			slowed = true;
-		}
-	}
-	int64_t p = base + step;
-	kfg_candidate cand = kfg_sched_eval_pos(s, p, k);
-	if (!cand.ok && step != Q) {
-		// The chosen position is not ready: the normal step, the catch-up waits.
-		extra = 0;
-		p = base + Q;
-		cand = kfg_sched_eval_pos(s, p, k);
-	}
-
-	if (!cand.ok && !s->warming &&
-	    (cand.reason == KFG_REPEAT_SOURCE_LATE || cand.reason == KFG_REPEAT_ME_LATE)) {
-		// A prediction may be optimistic. Use a remaining half-step when it is
-		// actually ready, instead of freezing with valid content still available.
-		const int64_t slow = base + Q / 2;
-		kfg_candidate tail = kfg_sched_eval_pos(s, slow, k);
-		if (tail.ok) {
-			p = slow;
-			cand = tail;
-			extra = 0;
-			slowed = true;
-			if (!d.catchup) {
-				d.catchup = true;
-				s->n_catchup++;
+	const bool overdue = (newest->t < newest->latch ? newest->t : newest->latch) + kfg_sched_next_gap(s) <= k;
+	int64_t p = base + Q;
+	int plan = KFG_PLAN_NORMAL;
+	int64_t to_real = 0;  // what is left to the next real frame, 1/SUB vblank (0: none known)
+	if (!s->warming) {
+		const kfg_source_slot *a, *b;
+		const int back = kfg_sched_locate(s, kfg_sched_vbl(base), &a, &b);
+		if (back > 0) {
+			to_real = b->t * Q - base;
+			if (s->wall_ref >= 0 && k - s->trouble_k <= 2 * (int64_t)s->cfg.multiplier + 2) {
+				// A slow-down or a repeat just added delay: the display is behind where its
+				// steady delay would show the next real frame. It keeps up to KFG_REANCHOR
+				// vblanks of that (the source runs later now: speeding up again right away
+				// would only run short at the next late latch, and the give-back takes it back
+				// after a calm stretch); the rest, a game stall, is paid back by the plan's
+				// catch-up instead of piling up into a resynchronisation.
+				const int64_t behind = k - 1 + (to_real + Q - 1) / Q - (b->t + s->wall_ref);
+				int64_t cap = s->episode_ref + KFG_REANCHOR;
+				if (cap > (int64_t)s->cfg.max_delay - 1)
+					cap = (int64_t)s->cfg.max_delay - 1;
+				int64_t to = s->wall_ref + behind;
+				if (to > cap)
+					to = cap;
+				if (behind + s->wall_ref - s->episode_ref >= KFG_JUMP_DEBT && s->episode_ref >= 0) {
+					// A long stall is jumped over (kfg_sched_plan): the steady delay it had stays.
+					s->wall_ref = s->episode_ref;
+					to = s->wall_ref;
+				}
+				if (to > s->wall_ref) {
+					if (s->wall_ref <= s->wall_floor + 1 &&
+					    k - s->giveback_k <= (s->episode_overdue ? (behind <= 1 ? 270 : -1) : 4 * (int64_t)s->cfg.multiplier + 4)) {
+						// A give-back near the lowest delay ran short: right after it the
+						// cadence needed more, or within 3 s a game frame came up to a vblank
+						// late, which the vblank given back would have absorbed (a long stall
+						// would not have been). Try it again later each time (up to every 30 s
+						// at 90 Hz).
+						s->giveback_wait = s->giveback_wait < 1350u ? 2u * s->giveback_wait : 2700u;
+						s->fail_k = k;
+					}
+					s->wall_ref = to;
+				}
+			}
+			// A catch-up across a short interval keeps its target until it gets there.
+			int target = back - 1;
+			bool span = true;
+			if (s->plan_id) {
+				for (int i = target - 1; i >= 0; i--) {
+					if (kfg_sched_slot(s, (uint32_t)i)->id == s->plan_id) {
+						target = i;
+						span = false;
+						break;
+					}
+				}
+			}
+			bool held;
+			p = kfg_sched_plan(s, k, base, &target, span, &plan, &held);
+			s->plan_id = target != back - 1 ? kfg_sched_slot(s, (uint32_t)target)->id : 0;
+			if (held && s->wall_ref >= 0 && k - s->giveback_k <= 4 * (int64_t)s->cfg.multiplier + 4) {
+				// The vblank just given back is not there: the next source is later than the
+				// give-back assumed. Keep the delay, and try again later each time.
+				s->wall_ref++;
+				s->giveback_k = INT64_MIN / 2;
+				s->giveback_wait = s->giveback_wait < 1350u ? 2u * s->giveback_wait : 2700u;
+				s->fail_k = k;
+				s->trouble_k = k;
+				target = back - 1;
+				s->plan_id = 0;
+				p = kfg_sched_plan(s, k, base, &target, false, &plan, &held);
 			}
 		}
 	}
+	const bool slowed = plan == KFG_PLAN_SLOW;
+	kfg_candidate cand = kfg_sched_eval_pos(s, p, k);
+	if (!cand.ok && !s->warming && to_real > 0 && to_real <= Q &&
+	    (cand.reason == KFG_REPEAT_SOURCE_LATE || cand.reason == KFG_REPEAT_ME_LATE)) {
+		// The analysis of this pair is later than predicted, but the real frame that ends it
+		// is within one normal step: show it instead of freezing.
+		kfg_candidate tail = kfg_sched_eval_pos(s, base + to_real, k);
+		if (tail.ok) {
+			p = base + to_real;
+			cand = tail;
+		}
+	}
+	const int64_t step = p - base;
 
 	// Latency give-back: after a calm stretch in which one more vblank of content was also
-	// ready, the display owes one vblank less; it is taken back by the catch-up above. The
-	// steady delay stays a whole number of vblanks, so real frames keep landing on vblanks.
+	// ready, the display owes one vblank less; the plan takes it back over the next interval.
 	if (cand.ok) {
 		kfg_candidate next = kfg_sched_eval_pos(s, p + Q, k);
-		if (next.ok && s->catchup <= 0)
+		if (next.ok && plan != KFG_PLAN_FAST)
 			s->ahead_streak++;
 		else
 			s->ahead_streak = 0;
@@ -717,36 +852,46 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 	if (!cand.ok && s->warming && cand.reason == KFG_REPEAT_SOURCE_LATE)
 		cand.reason = KFG_REPEAT_WARMUP;
 
-	if (!cand.ok && s->wall_ref >= 0 && (cand.reason == KFG_REPEAT_SOURCE_LATE || cand.reason == KFG_REPEAT_ME_LATE) &&
-	    k - s->realign_k <= 2 * (int64_t)s->cfg.multiplier + 2) {
+	const bool late = !cand.ok && (cand.reason == KFG_REPEAT_SOURCE_LATE || cand.reason == KFG_REPEAT_ME_LATE);
+	if (late && s->wall_ref >= 0 && k - s->realign_k <= 2 * (int64_t)s->cfg.multiplier + 2) {
 		// The last catch-up was too aggressive for current conditions: back off one vblank.
 		if (s->wall_ref < (int64_t)s->cfg.max_delay)
 			s->wall_ref++;
-		s->catchup = 0;
 		s->realign_k = INT64_MIN / 2;
 	}
 
 	const int64_t pc = kfg_sched_vbl(p);
-	if (!cand.ok || slowed)
+	if (!cand.ok || slowed) {
+		// A new episode of trouble (a slow-down or a repeat) starts from the delay held so far.
+		if (k - s->trouble_k > 2) {
+			s->episode_ref = s->wall_ref;
+			s->episode_overdue = false;
+		}
+		s->episode_overdue |= overdue;
 		s->trouble_k = k;
+	}
 	if (!cand.ok) {
 		d.show = KFG_SHOW_REPEAT;
 		d.reason = cand.reason;
 		s->n_repeat++;
 		s->n_repeat_reason[cand.reason]++;
 	} else {
-		if (extra > 0) {
-			s->catchup -= extra;
-			s->realign_k = k;
+		if (step != Q) {
 			d.catchup = true;
 			s->n_catchup++;
+			if (step > Q) {
+				s->realign_k = k;
+				s->n_fast++;
+			} else {
+				s->n_slow++;
+			}
 		}
 		s->content = pc;
 		s->frac = (uint32_t)(p - pc * Q);
 		if (cand.show == KFG_SHOW_GEN && cand.src_b == s->last_gen_pair && cand.num == s->last_gen_phase_num &&
 		    cand.den == s->last_gen_phase_den) {
-			// Same quantised phase as the previous output (cadence mismatch): count as a repeat
-			// but let content advance so the display does not fall behind.
+			// Same phase as the previous output: count as a repeat but let content advance so
+			// the display does not fall behind.
 			d.show = KFG_SHOW_REPEAT;
 			d.reason = KFG_REPEAT_CADENCE;
 			s->n_repeat++;
@@ -772,30 +917,18 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		s->content = pc; // content advances on a cadence hole
 		s->frac = (uint32_t)(p - pc * Q);
 	}
-	if (s->catchup < 0)
-		s->catchup = 0;
+	s->catchup = 0;
 	if (cand.ok && !s->warming) {
-		const int64_t now = k - s->content;
+		// Delay of this output in whole vblanks, rounded down (a position between two vblanks
+		// of content counts as the later one).
+		const int64_t now = k - (s->content + (s->frac ? 1 : 0));
 		if (s->wall_ref < 0) {
 			s->wall_ref = now;
 			s->wall_floor = now;
-		} else if (slowed && now > s->wall_ref) {
-			// A slow-down is not paid back: the display keeps the delay it settled at, so
-			// it does not speed up again right away only to run short at the next late
-			// latch. The give-back above takes it back after a calm stretch.
-			if (s->wall_ref <= s->wall_floor + 1 &&
-			    k - s->giveback_k <= (overdue ? (now - s->wall_ref <= 1 ? 270 : -1) : 4 * (int64_t)s->cfg.multiplier + 4)) {
-				// A give-back near the lowest delay ran short: right after it the cadence
-				// needed more, or within 3 s a game frame came up to a vblank late, which the
-				// vblank given back would have absorbed (a long stall would not have been).
-				// Try it again later each time (up to every 30 s at 90 Hz).
-				s->giveback_wait = s->giveback_wait < 1350u ? 2u * s->giveback_wait : 2700u;
-				s->fail_k = k;
-			}
-			s->wall_ref = now;
-			s->catchup = 0;
 		}
 	}
+	if (!first)
+		kfg_sched_count_pass(s, &d, p_before, s->content * Q + (int64_t)s->frac);
 	d.state = s->state;
 	d.content = s->content;
 	d.pos = s->content * Q + (int64_t)s->frac;
