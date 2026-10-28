@@ -121,7 +121,19 @@ typedef struct kfg_sched_config {
 	uint32_t cadence_frames;    // the cap's cadence: cadence_frames source frames every
 	uint32_t cadence_vblanks;   // cadence_vblanks vblanks (40 fps at 90 Hz: 4 in 9; x3: 1 in 3)
 	uint32_t giveback_calm;     // vblanks without a slow-down or a repeat before latency is given back
+	uint32_t strict;            // honest multiplier (enum kfg_strict): at most multiplier - 1
+	                            // generated frames per source interval, at phases k/multiplier
 } kfg_sched_config;
+
+// Strict multiplier (GSF 1.5): xN shows exactly N - 1 generated frames between two real frames,
+// at phases 1/N .. (N-1)/N (an interval of fewer than N vblanks: one per vblank). With the refresh at N x the cap and the game at the cap this is
+// exact. When an interval has more vblanks than N (a fixed 90 Hz panel at x2 base 35: 2 or 3
+// vblanks per source frame), frames are held for whole vblanks:
+//   STRETCH: each generated frame on the vblank nearest its own time (holds spread evenly,
+//            locked to the real frames);
+//   HOLD:    generated frames on the vblanks right after the real frame, the last one held;
+//   REAL:    the real frame held, the generated frames on the last vblanks before the next.
+enum kfg_strict { KFG_STRICT_OFF = 0, KFG_STRICT_STRETCH = 1, KFG_STRICT_HOLD = 2, KFG_STRICT_REAL = 3 };
 
 typedef struct kfg_source_slot {
 	uint64_t id;
@@ -159,6 +171,8 @@ typedef struct kfg_sched {
 	uint32_t last_gen_phase_den;
 	int64_t last_vblank;
 	uint64_t last_gen_pair; // src_b of the last generated pair (cadence de-duplication)
+	int64_t disp_pos;        // strict: content position of the image on screen, 1/SUB vblank
+	uint32_t gens_since_real; // generated frames shown since the last real frame
 	uint32_t last_gen_phase_num;
 	uint32_t ahead_streak;
 	int64_t wall_ref;       // established k - content of the steady cadence; -1 unknown
@@ -191,6 +205,8 @@ typedef struct kfg_sched {
 	uint64_t n_real_missed;       // source frames the content passed without showing them
 } kfg_sched;
 
+// At most this many generated frames between two real frames, whatever the mode (x3: 2).
+#define KFG_MAX_GEN_PER_REAL 2u
 static inline kfg_sched_config kfg_sched_default_config(uint32_t multiplier)
 {
 	kfg_sched_config c;
@@ -205,6 +221,7 @@ static inline kfg_sched_config kfg_sched_default_config(uint32_t multiplier)
 	c.cadence_frames = 1;
 	c.cadence_vblanks = multiplier;
 	c.giveback_calm = 90;     // 1 s at 90 Hz
+	c.strict = KFG_STRICT_OFF;
 	return c;
 }
 
@@ -291,6 +308,17 @@ static inline uint32_t kfg_sched_gcd(uint32_t a, uint32_t b);
 // expects each source where it really comes instead of at the mean, so a 2-vblank gap is not
 // taken for an early frame and a 3-vblank gap for a late one. 0 or a refresh at or below the
 // cap: the whole multiplier.
+// Strict multiplier mode (enum kfg_strict); takes effect at the next decision.
+static inline uint32_t kfg_sched_gen_limit(const kfg_sched *s)
+{
+	const uint32_t m = s->cfg.multiplier > 1 ? s->cfg.multiplier - 1 : KFG_MAX_GEN_PER_REAL;
+	return m < KFG_MAX_GEN_PER_REAL ? m : KFG_MAX_GEN_PER_REAL;
+}
+static inline void kfg_sched_set_strict(kfg_sched *s, uint32_t mode)
+{
+	s->cfg.strict = mode <= KFG_STRICT_REAL ? mode : KFG_STRICT_STRETCH;
+}
+
 static inline void kfg_sched_set_cadence(kfg_sched *s, uint32_t refresh_hz, uint32_t cap_fps)
 {
 	uint32_t frames = 1, vblanks = s->cfg.multiplier;
@@ -328,7 +356,9 @@ static inline int64_t kfg_sched_next_gap(const kfg_sched *s)
 		if (newest->t - first->t == V) {
 			const kfg_source_slot *a = kfg_sched_slot(s, P);
 			const kfg_source_slot *b = kfg_sched_slot(s, P - 1u);
-			return b->t - a->t;
+			const int64_t g = b->t - a->t;
+			if (g >= V / (int64_t)P && g <= (V + (int64_t)P - 1) / (int64_t)P)
+				return g;  // a gap of the cadence (not one a drifted grid made up)
 		}
 	}
 	return (V + (int64_t)P / 2) / (int64_t)P;
@@ -390,6 +420,15 @@ static inline bool kfg_sched_on_latch(kfg_sched *s, uint64_t id, int64_t vbl)
 		// latch is at most one vblank off it; a slower or faster source keeps its latches.
 		if (dev >= -3 * P && dev <= 3 * P && vbl - grid >= -1 && vbl - grid <= 1)
 			slot->t = grid;
+		// GSF 1.5: a fractional cadence (P > 1) keeps every gap at floor(V/P) or ceil(V/P)
+		// vblanks (25 at 60 Hz: 2 or 3, never the 2, 2, 2, 2, 4 a rounded mean gap drifts
+		// into, which a two-generated-frame limit would have to hold).
+		if (P > 1 && dev >= -3 * P && dev <= 3 * P) {
+			const int64_t lo = newest->t + V / P, hi = newest->t + (V + P - 1) / P;
+			const int64_t c = vbl < lo ? lo : vbl > hi ? hi : vbl;
+			if (vbl - c >= -1 && vbl - c <= 1)
+				slot->t = c;
+		}
 	}
 	if (newest && slot->t <= newest->t)
 		slot->t = newest->t + 1;
@@ -988,8 +1027,46 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		}
 		s->content = pc;
 		s->frac = (uint32_t)(p - pc * Q);
-		if (cand.show == KFG_SHOW_GEN && cand.src_b == s->last_gen_pair && cand.num == s->last_gen_phase_num &&
-		    cand.den == s->last_gen_phase_den) {
+		bool strict_hold = false;
+		int64_t shown_pos = p;
+		const kfg_source_slot *sa = cand.show == KFG_SHOW_GEN ? kfg_sched_find(s, cand.src_a) : NULL;
+		const kfg_source_slot *sb = cand.show == KFG_SHOW_GEN ? kfg_sched_find(s, cand.src_b) : NULL;
+		const int64_t span_v = sa && sb ? sb->t - sa->t : 0;
+		const int64_t n_max = (int64_t)kfg_sched_gen_limit(s) + 1;
+		if (sa && sb && s->cfg.multiplier > 1 && (s->cfg.strict || span_v > n_max)) {
+			// Honest multiplier: the generated frame at phase j/N nearest (STRETCH) or next
+			// (HOLD) to the content position; never more than N - 1 per interval, never back.
+			// Fill mode (strict off) takes the same path, with STRETCH, on an interval longer
+			// than the generated-frame limit can fill (a stall or a game far under the cap).
+			// N for this interval: the multiplier (at most KFG_MAX_GEN_PER_REAL + 1), or fewer
+			// when the interval has fewer vblanks (a fractional base: 35 at 90 Hz alternates 2
+			// and 3 vblanks, so one and two generated frames).
+			const int64_t N = span_v < n_max ? span_v : n_max;
+			const int64_t span_q = span_v * Q, off = p - sa->t * Q;
+			int64_t j = s->cfg.strict == KFG_STRICT_HOLD ? (off * N + span_q - 1) / span_q
+			          : s->cfg.strict == KFG_STRICT_REAL ? (off * N) / span_q
+			                                             : (2 * off * N + span_q - 1) / (2 * span_q);
+			// STRETCH rounds half down: on a tie the frame waits for its own vblank, so a long
+			// interval spreads its frames evenly (6 vblanks, x3: 2, 2, 2, not 1, 2, 3).
+			if (j > N - 1)
+				j = N - 1;
+			if (N < 2 || j < 1 ||
+			    (cand.src_b == s->last_gen_pair && j * (int64_t)s->last_gen_phase_den <= (int64_t)s->last_gen_phase_num * N))
+				strict_hold = true;
+			else {
+				const uint32_t g = kfg_sched_gcd((uint32_t)j, (uint32_t)N);
+				cand.num = (uint32_t)j / g;
+				cand.den = (uint32_t)N / g;
+				shown_pos = sa->t * Q + (j * span_q + N / 2) / N;
+			}
+		}
+		// Hard limit in every mode: at most multiplier - 1 and never more than
+		// KFG_MAX_GEN_PER_REAL generated frames between two real frames (x2: one). A longer
+		// interval (a stall) repeats the last frame shown.
+		if (cand.show == KFG_SHOW_GEN && s->gens_since_real >= kfg_sched_gen_limit(s))
+			strict_hold = true;
+		if (strict_hold || (cand.show == KFG_SHOW_GEN && cand.src_b == s->last_gen_pair && cand.num == s->last_gen_phase_num &&
+		    cand.den == s->last_gen_phase_den)) {
 			// Same phase as the previous output: count as a repeat but let content advance so
 			// the display does not fall behind.
 			d.show = KFG_SHOW_REPEAT;
@@ -1002,14 +1079,17 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 			d.src_b = cand.src_b;
 			d.phase_num = cand.num;
 			d.phase_den = cand.den;
+			s->disp_pos = cand.show == KFG_SHOW_GEN ? shown_pos : p;
 			if (cand.show == KFG_SHOW_GEN) {
 				s->last_gen_pair = cand.src_b;
 				s->last_gen_phase_num = cand.num;
 				s->last_gen_phase_den = cand.den;
 				s->warming = false;
 				s->n_gen++;
+				s->gens_since_real++;
 			} else {
 				s->n_real++;
+				s->gens_since_real = 0;
 			}
 		}
 	}
@@ -1032,6 +1112,8 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 	d.state = s->state;
 	d.content = s->content;
 	d.pos = s->content * Q + (int64_t)s->frac;
+	if (d.show == KFG_SHOW_GEN)
+		d.pos = s->disp_pos;  // the phase shown, not the content clock
 	d.delay = newest->t - s->content;
 	return d;
 }

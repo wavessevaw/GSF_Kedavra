@@ -70,6 +70,7 @@ typedef struct params {
 	double fg_slowdown;      // fractional slowdown of the game while generation runs
 	double vblank_jitter_us;
 	double cut_prob;         // per-source probability of a scene cut
+	double strict;           // strict multiplier mode (enum kfg_strict: 0 off, 1 stretch, 2 hold)
 	double aligned;          // 1: the stock limiter (a frame latches only on the first vblank of a slot)
 	double pipelined;        // 1: the game renders its next frame while one waits to be latched
 	double me_min_vblanks;   // analysis usable no earlier than this many vblanks after the latch
@@ -88,7 +89,7 @@ static void usage(void)
 		"kfg_sim [--refresh HZ] [--mult N] [--cap FPS] [--game-ms MS] [--game-p99-ms MS]\n"
 		"        [--spike-prob P] [--spike-ms MS] [--me-ms MS] [--me-p99-ms MS] [--me-min-vblanks N] [--warp-ms MS]\n"
 		"        [--compose-ms MS] [--compose-p99-ms MS] [--redzone-ms MS] [--fg-slowdown F]\n"
-		"        [--aligned 0|1] [--pipelined 0|1] [--cut-prob P] [--duration S] [--seed N] [--event T:what:value]... --trace out.csv [--sources out.csv]\n"
+		"        [--aligned 0|1] [--pipelined 0|1] [--strict 0|1|2] [--cut-prob P] [--duration S] [--seed N] [--event T:what:value]... --trace out.csv [--sources out.csv]\n"
 		"events: cap, mult, off, on, refresh, gap (ms of no game output), me_scale, game_ms\n");
 }
 
@@ -110,7 +111,7 @@ static int parse(int argc, char **argv, params *p)
 		NUM("--compose-ms", compose_ms) NUM("--compose-p99-ms", compose_p99_ms)
 		NUM("--redzone-ms", redzone_ms) NUM("--fg-slowdown", fg_slowdown)
 		NUM("--vblank-jitter-us", vblank_jitter_us) NUM("--duration", duration_s) NUM("--cut-prob", cut_prob) NUM("--me-min-vblanks", me_min_vblanks)
-		NUM("--aligned", aligned) NUM("--pipelined", pipelined)
+		NUM("--aligned", aligned) NUM("--pipelined", pipelined) NUM("--strict", strict)
 #undef NUM
 		if (!strcmp(a, "--mult") && v) { p->mult = (uint32_t)atoi(v); i++; continue; }
 		if (!strcmp(a, "--seed") && v) { p->seed = strtoull(v, NULL, 10); i++; continue; }
@@ -171,6 +172,7 @@ int main(int argc, char **argv)
 	double refresh_ns = 1e9 / p.refresh_hz;
 	double me_scale = 1.0;
 	kfg_sched_config cfg = kfg_sched_default_config(p.mult);
+	cfg.strict = (uint32_t)p.strict;
 	kfg_sched s;
 	kfg_sched_init(&s, &cfg);
 

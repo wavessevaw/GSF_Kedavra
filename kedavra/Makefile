@@ -53,9 +53,11 @@ test-sched: $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_sim $(BUILD)/kfg
 	$(BUILD)/test_auto
 	$(PYTHON) sched/run_scenarios.py --sim $(BUILD)/kfg_sim --seeds 3 --out $(BUILD)/scenarios.json
 	# Replay smoke test: an 89 ms game frame every 10 s (Deck run B) is paid back, not skipped.
+	# GSF 1.5: at most two generated frames span the 8-vblank hitch (the rest holds), so each
+	# hitch moves the picture in up to 3 steps over 1.75 vblanks (6 hitches a minute).
 	$(PYTHON) sched/kfg_replay.py hitch -o $(BUILD)/hitch_events.csv --me-lag 2
 	$(PYTHON) sched/kfg_replay.py compare --bin new=$(BUILD)/kfg_replay --json $(BUILD)/hitch_replay.json $(BUILD)/hitch_events.csv
-	$(PYTHON) -c "import json,sys; r=json.load(open('$(BUILD)/hitch_replay.json'))['results']['hitch_events.csv']['new']; sys.exit(0 if r['resync_per_min']==0 and r['jump_per_min']==0 and r['real_shown']>0.99 else 1)"
+	$(PYTHON) -c "import json,sys; r=json.load(open('$(BUILD)/hitch_replay.json'))['results']['hitch_events.csv']['new']; sys.exit(0 if r['resync_per_min']==0 and r['jump_per_min']<=18 and r['real_shown']>0.99 and r['gen_interval_over']==0 else 1)"
 
 test-engine: $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
 	$(BUILD)/kfg_vktest --spv $(BUILD) --json $(BUILD)/engine.json

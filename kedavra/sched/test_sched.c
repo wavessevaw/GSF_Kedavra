@@ -79,11 +79,11 @@ static void test_locked_x2(void)
 
 // Base cap that does not divide the refresh (40 at 90 Hz): the limiter releases frames on
 // the vblanks where cap/90 steps (intervals 2 and 3). Every vblank must show a new real or
-// generated frame and content must advance by exactly one vblank per output. 24 at 90 Hz is
-// x3.75 (intervals 3 and 4, multiplier 4), the lowest cap Auto may use (kfg_auto_floor).
+// generated frame and content must advance by exactly one vblank per output. GSF 1.5: at most
+// two generated frames between two real frames, so the lowest base that fills 90 Hz is 30.
 static void test_fractional_cap(void)
 {
-	static const struct { int64_t cap; uint32_t mult; } caps[] = { { 40, 3 }, { 35, 3 }, { 24, 4 } };
+	static const struct { int64_t cap; uint32_t mult; } caps[] = { { 40, 3 }, { 35, 3 }, { 30, 3 } };
 	for (size_t c = 0; c < sizeof caps / sizeof caps[0]; c++) {
 		const int64_t cap = caps[c].cap;
 		kfg_sched_config cfg = kfg_sched_default_config(caps[c].mult);
@@ -114,7 +114,7 @@ static void test_fractional_cap(void)
 static void test_fractional_cadence(void)
 {
 	static const struct { int64_t cap, hz; uint32_t mult; } caps[] = {
-		{ 40, 90, 3 }, { 35, 90, 3 }, { 24, 90, 4 }, { 25, 60, 3 }, { 45, 90, 2 } };
+		{ 40, 90, 3 }, { 35, 90, 3 }, { 30, 90, 3 }, { 25, 60, 3 }, { 45, 90, 2 } };
 	for (size_t c = 0; c < sizeof caps / sizeof caps[0]; c++) {
 		const int64_t cap = caps[c].cap, hz = caps[c].hz;
 		kfg_sched_config cfg = kfg_sched_default_config(caps[c].mult);
@@ -144,8 +144,13 @@ static void test_fractional_cadence(void)
 			}
 			shown = here;
 		}
-		CHECK(changed * 100 <= total * 2, "%d fps at %d Hz: speed changed on %d of %d outputs", (int)cap, (int)hz,
+		// GSF 1.5: 25 at 60 Hz has 2.5 % (1.4.4: 1.1 %): a late frame there turns a 3-vblank
+		// interval into 4, which two generated frames cannot fill evenly any more.
+		const int allow = cap == 25 && hz == 60 ? 3 : 2;
+		CHECK(changed * 100 <= total * allow, "%d fps at %d Hz: speed changed on %d of %d outputs", (int)cap, (int)hz,
 		      changed, total);
+		if (getenv("KFG_TEST_VERBOSE"))
+			printf("cadence %d at %d Hz: speed changed on %d of %d\n", (int)cap, (int)hz, changed, total);
 	}
 }
 
@@ -207,8 +212,12 @@ static void test_silk_catchup(void)
 			if (k == 800)
 				delay_after = d.delay;
 		}
-		CHECK(jumps == 0, "x%u: %d jumps", mult, jumps);
-		CHECK(freezes <= 2, "x%u: %d freezes", mult, freezes);
+		// GSF 1.5: an interval one vblank longer than the multiplier holds a frame (at most
+		// multiplier - 1 generated frames), so each late frame may cost one freeze, and at x2
+		// one step of half the 3-vblank interval.
+		const int lates = 900 / (60 * (int)mult) + 1;
+		CHECK(jumps <= (mult == 2 ? lates : 0), "x%u: %d jumps", mult, jumps);
+		CHECK(freezes <= lates + 2, "x%u: %d freezes", mult, freezes);
 		CHECK(delay_after <= delay_before + 1, "x%u: delay %" PRId64 " -> %" PRId64, mult, delay_before, delay_after);
 		CHECK(s.n_catchup > 0, "x%u: no catch-up", mult);
 	}
@@ -315,10 +324,12 @@ static void test_fuzz(void)
 		uint32_t mult = 1 + rnd(4);
 		kfg_sched_config cfg = kfg_sched_default_config(mult);
 		cfg.catchup_streak = 1 + rnd(200);
+		cfg.strict = rnd(4);  // fill, stretch, hold, real
 		kfg_sched s;
 		kfg_sched_init(&s, &cfg);
 		uint64_t id = 0;
 		int64_t next = rnd(4);
+		uint32_t run_gens = 0;
 		int64_t prev_content = INT64_MIN;
 		int64_t me_ready[4096] = {0};
 		bool cut[4096] = {0}, ok[4096] = {0};
@@ -349,12 +360,20 @@ static void test_fuzz(void)
 				CHECK(d.pos > prev_content, "run %d k %" PRId64 ": content %" PRId64 " after %" PRId64, run, k, d.pos, prev_content);
 				prev_content = d.pos;
 			}
+			if (d.show == KFG_SHOW_REAL)
+				run_gens = 0;
 			if (d.show == KFG_SHOW_GEN) {
+				run_gens++;
+				CHECK(run_gens <= kfg_sched_gen_limit(&s), "run %d: %u generated frames since the last real (limit %u)", run,
+				      run_gens, kfg_sched_gen_limit(&s));
 				CHECK(d.src_b == d.src_a + 1, "run %d: gen across non-consecutive %" PRIu64 "->%" PRIu64, run, d.src_a, d.src_b);
 				CHECK(me_ready[d.src_b] <= k && ok[d.src_b] && !cut[d.src_b], "run %d: gen without valid analysis", run);
 				CHECK(d.phase_num > 0 && d.phase_num < d.phase_den, "run %d: phase %u/%u", run, d.phase_num, d.phase_den);
 				CHECK(d.pos > latch[d.src_a] * KFG_SCHED_SUB && d.pos < latch[d.src_b] * KFG_SCHED_SUB, "run %d: gen content outside its pair", run);
-				CHECK((int64_t)d.phase_num * (latch[d.src_b] - latch[d.src_a]) * KFG_SCHED_SUB == (d.pos - latch[d.src_a] * KFG_SCHED_SUB) * (int64_t)d.phase_den
+				// The position of a quantised phase (j/N of an interval longer than the
+				// generated-frame limit) rounds to the 1/SUB grid: within half a step.
+				const int64_t perr = (int64_t)d.phase_num * (latch[d.src_b] - latch[d.src_a]) * KFG_SCHED_SUB - (d.pos - latch[d.src_a] * KFG_SCHED_SUB) * (int64_t)d.phase_den;
+				CHECK(2 * (perr < 0 ? -perr : perr) <= (int64_t)d.phase_den
 				      || (latch[d.src_b] - latch[d.src_a]) > (int64_t)s.cfg.max_fill_span, "run %d: phase does not match the content position", run);
 			}
 			if (d.show == KFG_SHOW_REAL && d.state == KFG_STATE_ACTIVE && d.content < latch[d.src_a])
@@ -362,6 +381,73 @@ static void test_fuzz(void)
 			CHECK(d.show == KFG_SHOW_NONE || d.delay <= (int64_t)cfg.max_delay + 16, "run %d: delay %" PRId64, run, d.delay);
 		}
 	}
+}
+
+// GSF 1.5 strict multiplier: xN shows exactly N - 1 generated frames per real interval at
+// phases k/N, holds the rest of a longer interval, and never shows more than two.
+static void test_strict(void)
+{
+	static const struct { uint32_t mult, strict; int64_t span; int gens; } cases[] = {
+		{ 2, KFG_STRICT_STRETCH, 2, 1 }, { 2, KFG_STRICT_STRETCH, 3, 1 }, { 2, KFG_STRICT_STRETCH, 4, 1 },
+		{ 3, KFG_STRICT_STRETCH, 3, 2 }, { 3, KFG_STRICT_STRETCH, 4, 2 }, { 3, KFG_STRICT_HOLD, 4, 2 },
+		{ 3, KFG_STRICT_REAL, 4, 2 }, { 2, KFG_STRICT_OFF, 3, 1 }, { 3, KFG_STRICT_OFF, 5, 2 }, { 4, KFG_STRICT_OFF, 4, 2 },
+	};
+	for (size_t c = 0; c < sizeof cases / sizeof cases[0]; c++) {
+		kfg_sched_config cfg = kfg_sched_default_config(cases[c].mult);
+		cfg.strict = cases[c].strict;
+		kfg_sched s;
+		kfg_sched_init(&s, &cfg);
+		uint64_t id = 0;
+		int gens = 0, intervals = 0, bad = 0, bad_phase = 0;
+		for (int64_t k = 0; k < 1800; k++) {
+			if (k % cases[c].span == 0) {
+				kfg_sched_on_latch(&s, ++id, k);
+				kfg_sched_on_me(&s, id, k + 1, true, false);
+			}
+			kfg_decision d = kfg_sched_decide(&s, k);
+			if (k < 120)
+				continue;
+			if (d.show == KFG_SHOW_REAL) {
+				if (intervals++ && gens != cases[c].gens)
+					bad++;
+				gens = 0;
+			} else if (d.show == KFG_SHOW_GEN) {
+				gens++;
+				const uint32_t N = (uint32_t)cases[c].gens + 1;
+				if (cases[c].strict && (d.phase_num * N) % d.phase_den)
+					bad_phase++;  // strict: phases are multiples of 1/N
+			}
+		}
+		CHECK(bad == 0 && intervals > 100, "strict %u x%u span %d: %d of %d intervals without %d generated frames", cases[c].strict,
+		      cases[c].mult, (int)cases[c].span, bad, intervals, cases[c].gens);
+		CHECK(bad_phase == 0, "strict %u x%u span %d: %d phases off k/N", cases[c].strict, cases[c].mult, (int)cases[c].span, bad_phase);
+	}
+	// Fractional base (35 at 90 Hz, x3 strict): intervals of 2 and 3 vblanks, one and two
+	// generated frames, never three.
+	kfg_sched_config cfg = kfg_sched_default_config(3);
+	cfg.strict = KFG_STRICT_STRETCH;
+	kfg_sched s;
+	kfg_sched_init(&s, &cfg);
+	kfg_sched_set_cadence(&s, 90, 35);
+	uint64_t id = 0;
+	int gens = 0, ones = 0, twos = 0, other = 0, n = 0;
+	for (int64_t k = 0; k < 1800; k++) {
+		if (k == 0 || (k * 35) / 90 != ((k - 1) * 35) / 90) {
+			kfg_sched_on_latch(&s, ++id, k);
+			kfg_sched_on_me(&s, id, k + 2, true, false);
+		}
+		kfg_decision d = kfg_sched_decide(&s, k);
+		if (k < 120)
+			continue;
+		if (d.show == KFG_SHOW_REAL) {
+			if (n++)
+				*(gens == 1 ? &ones : gens == 2 ? &twos : &other) += 1;
+			gens = 0;
+		} else if (d.show == KFG_SHOW_GEN) {
+			gens++;
+		}
+	}
+	CHECK(other == 0 && ones > 100 && twos > 100, "35 at 90 Hz strict x3: %d with one, %d with two, %d other", ones, twos, other);
 }
 
 int main(void)
@@ -376,6 +462,7 @@ int main(void)
 	test_cut();
 	test_short_runway();
 	test_ready_tail();
+	test_strict();
 	test_fuzz();
 	if (failures) {
 		fprintf(stderr, "%d failure(s)\n", failures);

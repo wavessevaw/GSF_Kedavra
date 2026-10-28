@@ -20,6 +20,14 @@ Metrics (decision rows in the active state, one per compositor vblank):
   speed_change_pct  vblanks whose content step is outside 0.8-1.2 vblank (repeats included)
   freeze_pct        vblanks whose content step is below 1/4 vblank (repeats included)
   real_shown        source frames shown unmodified / sources latched while generating
+  judder_ms         distance of the shown position from the straight line between the two real
+                    frames around it (ms of content): mean, p95
+  duration_err_ms   how far each frame's time on screen is from an even split of the interval
+                    between its real frames (1/(N x base) at the cap): mean, p95
+  gen_per_real      generated frames shown per real frame (xN honest: N - 1)
+  gen_interval_over real-to-real intervals with more generated frames than min(mult - 1, 2)
+                    (hard limit, whole trace); gen_interval_max the most in one interval
+  shown_per_real    outputs (vblanks) per real frame
   latency_ms        display vblank minus the content time shown (vblanks of the latch grid,
                     so it includes analysis lag and the steady delay): mean, p95, p99
 
@@ -164,6 +172,7 @@ def metrics(rows, skip_s=2.0):
     k0 = int(rows[0]["vblank"])
     refresh_ns = float(rows[0]["refresh_ns"])
     skip_k = k0 + int(skip_s * 1e9 / refresh_ns)
+    seq = []
     n = rep = resync = jumps = speed = steps = freeze = 0
     lat = []
     sources = set()
@@ -211,7 +220,42 @@ def metrics(rows, skip_s=2.0):
         if here is not None:
             lat.append((k - here) * refresh_ns / 1e6)
             shown = here
+        seq.append((k, here, kind))
         prev_k = k
+    # Timing error of what is on screen: between two consecutive real frames the content should
+    # move linearly from one to the other; judder is how far the shown position is off that line.
+    err, dur_err = [], []
+    reals = [i for i, (_, _, kind) in enumerate(seq) if kind == "real"]
+    gens = sum(1 for _, _, kind in seq if kind == "gen")
+    for i0, i1 in zip(reals, reals[1:]):
+        (k0, p0, _), (k1, p1, _) = seq[i0], seq[i1]
+        if k1 - k0 != i1 - i0 or k1 <= k0:
+            continue  # a gap (inactive rows) in between
+        for k, here, _ in seq[i0 + 1:i1]:
+            if here is not None:
+                err.append(abs(here - (p0 + (k - k0) * (p1 - p0) / (k1 - k0))) * refresh_ns / 1e6)
+        # How long each frame stays on screen against an even split of the real interval.
+        starts = [k for k, _, kind in seq[i0:i1] if kind != "repeat"] + [k1]
+        ideal = (k1 - k0) / (len(starts) - 1)
+        dur_err.extend(abs((b - a) - ideal) * refresh_ns / 1e6 for a, b in zip(starts, starts[1:]))
+    # Hard limit: generated frames between two real frames, over the whole trace (stalls and
+    # warm-up included). Limit min(mult - 1, 2): x2 one, x3 and above two.
+    run = 0
+    over = gmax = intervals = 0
+    hist = {}
+    for r in rows:
+        kind = r["kind"]
+        if kind == "gen":
+            run += 1
+        elif kind == "real":
+            if intervals or run:
+                m = int(r.get("mult") or 0)
+                limit = min(m - 1, 2) if m > 1 else 2
+                over += run > limit
+                gmax = max(gmax, run)
+                hist[run] = hist.get(run, 0) + 1
+            intervals += 1
+            run = 0
     minutes = max(1e-9, vblanks * refresh_ns / 60e9)
     src = sources if has_latch else seen_ids
     return {
@@ -225,25 +269,43 @@ def metrics(rows, skip_s=2.0):
         "real_shown": len(shown_real & src) / max(1, len(src)),
         "sources": len(src),
         "latency_ms": {"mean": sum(lat) / max(1, len(lat)), "p95": pct(lat, 0.95), "p99": pct(lat, 0.99)},
+        "judder_ms": {"mean": sum(err) / max(1, len(err)), "p95": pct(err, 0.95)},
+        "duration_err_ms": {"mean": sum(dur_err) / max(1, len(dur_err)), "p95": pct(dur_err, 0.95)},
+        "gen_per_real": gens / max(1, len(reals)),
+        "shown_per_real": n / max(1, len(reals)),
+        "gen_interval_over": over,
+        "gen_interval_max": gmax,
+        "gen_interval_hist": {str(k): v for k, v in sorted(hist.items())},
     }
 
 
 FIELDS = [("repeat_pct", "repeat %", -1), ("resync_per_min", "resync/min", -1), ("jump_per_min", "jumps/min", -1),
           ("speed_change_pct", "speed chg %", -1), ("freeze_pct", "freeze %", -1), ("real_shown", "real shown", 1),
-          ("lat_mean", "lat mean ms", -1), ("lat_p95", "lat p95 ms", -1), ("lat_p99", "lat p99 ms", -1)]
+          ("lat_mean", "lat mean ms", -1), ("lat_p95", "lat p95 ms", -1), ("lat_p99", "lat p99 ms", -1),
+          ("judder_mean", "judder ms", -1), ("judder_p95", "judder p95", -1),
+          ("dur_err_mean", "dur err ms", -1), ("dur_err_p95", "dur err p95", -1), ("gen_per_real", "gen/real", 0),
+          ("gen_interval_over", "gen>limit", -1), ("gen_interval_max", "gen max", -1)]
 
 
 def flat(m):
     out = {k: m.get(k) for k, _, _ in FIELDS if k in m}
     lat = m.get("latency_ms") or {}
     out["lat_mean"], out["lat_p95"], out["lat_p99"] = lat.get("mean"), lat.get("p95"), lat.get("p99")
+    jud = m.get("judder_ms") or {}
+    out["judder_mean"], out["judder_p95"] = jud.get("mean"), jud.get("p95")
+    dur = m.get("duration_err_ms") or {}
+    out["dur_err_mean"], out["dur_err_p95"] = dur.get("mean"), dur.get("p95")
+    out["gen_per_real"] = m.get("gen_per_real")
+    out["gen_interval_over"], out["gen_interval_max"] = m.get("gen_interval_over"), m.get("gen_interval_max")
     return out
 
 
-def replay(binary, events_path, me_lag=None, cap=None):
+def replay(binary, events_path, me_lag=None, cap=None, extra=""):
+    """binary may carry its own arguments after '::' (e.g. 'build/kfg_replay::--strict 1')."""
+    binary, _, own = binary.partition("::")
     with tempfile.TemporaryDirectory() as d:
         trace = os.path.join(d, "replay.csv")
-        cmd = [binary, "--events", events_path, "--trace", trace]
+        cmd = [binary, "--events", events_path, "--trace", trace] + own.split() + extra.split()
         if me_lag is not None:
             cmd += ["--me-lag", str(me_lag)]
         if cap is not None:

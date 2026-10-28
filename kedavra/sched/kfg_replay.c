@@ -36,7 +36,7 @@
 int main(int argc, char **argv)
 {
 	const char *in = NULL, *out = NULL;
-	int me_lag = -1, cap_override = -1;
+	int me_lag = -1, cap_override = -1, strict = 0, mult_override = -1;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--events") && i + 1 < argc)
 			in = argv[++i];
@@ -46,8 +46,14 @@ int main(int argc, char **argv)
 			me_lag = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--cap") && i + 1 < argc)
 			cap_override = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--mult") && i + 1 < argc)
+			mult_override = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--strict") && i + 1 < argc)
+			strict = atoi(argv[++i]);
 		else {
-			fprintf(stderr, "kfg_replay --events in.csv --trace out.csv [--me-lag N] [--cap FPS]\n"
+			fprintf(stderr, "kfg_replay --events in.csv --trace out.csv [--me-lag N] [--cap FPS] [--mult N] [--strict 0|1|2|3]\n"
+				"  --mult N: replace the recorded multiplier (where it is above 1)\n"
+				"  --strict M: strict multiplier mode (0 off, 1 stretch, 2 hold; headers before GSF 1.5: -DREPLAY_NO_STRICT)\n"
 				"  --me-lag N: me_ready = latch + N instead of the recorded value\n"
 				"  --cap FPS: base cap passed to the scheduler instead of the recorded one\n");
 			return 2;
@@ -97,10 +103,17 @@ int main(int argc, char **argv)
 			hz = 90;
 		if (cap_override >= 0)
 			cap = (unsigned)cap_override;
+		if (mult_override > 1 && m > 1)
+			m = (unsigned)mult_override;
 		if (!init) {
 			if (m <= 1)
 				continue;
 			kfg_sched_config cfg = kfg_sched_default_config(m);
+#ifndef REPLAY_NO_STRICT
+			cfg.strict = (uint32_t)strict;
+#else
+			(void)strict;
+#endif
 			kfg_sched_init(&s, &cfg);
 			init = true;
 			mult = m;

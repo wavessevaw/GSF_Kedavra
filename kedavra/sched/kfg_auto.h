@@ -79,10 +79,12 @@ static inline void kfg_auto_set_level(kfg_auto *a, uint32_t level)
 // rounded up) and the game never runs below 24 fps. 90 Hz: 24 (x3.75), 60 Hz: 24 (x2.5),
 // 120 Hz: 30 (x4). Without a floor Auto stays at x3 at most; the plugin offers the 120 Hz x4
 // floor only as a hidden, not recommended option.
+// GSF 1.5: at most two generated frames between two real frames, so the floor is refresh / 3
+// rounded up (90 Hz: 30, x3; 60 Hz: 20; 120 Hz: 40) and Auto stays within x2 to x3.
 static inline uint32_t kfg_auto_min_floor(uint32_t refresh_hz)
 {
-	const uint32_t f = kfg_auto_div_up(refresh_hz, 4u);
-	return f < 24u ? 24u : f;
+	const uint32_t f = kfg_auto_div_up(refresh_hz, 3u);
+	return f < 20u ? 20u : f;
 }
 
 // floor_fps: lowest cap; 0 = refresh / 3 (x3). Clamped to [kfg_auto_min_floor, refresh / 3].

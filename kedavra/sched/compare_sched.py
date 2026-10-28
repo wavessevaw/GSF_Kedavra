@@ -67,16 +67,18 @@ for base in ("x3_cap30_game29", "x3_cap40_game34", "x2_cap45_near"):
 
 # Noise tolerance per metric (worse direction): absolute.
 TOL = {"freeze_pct": 0.02, "repeat_pct": 0.02, "resync_per_min": 0.05, "jump_per_min": 0.05, "speed_change_pct": 0.10,
-       "real_shown": 0.002, "lat_mean": 0.3, "lat_p95": 0.5, "lat_p99": 0.5, "game_lat_p50": 0.5, "game_lat_p99": 1.0}
+       "real_shown": 0.002, "lat_mean": 0.3, "lat_p95": 0.5, "lat_p99": 0.5, "game_lat_p50": 0.5, "game_lat_p99": 1.0,
+       "judder_mean": 0.1, "judder_p95": 0.3, "dur_err_mean": 0.1, "dur_err_p95": 0.3, "gen_per_real": 0.0,
+       "gen_interval_over": 0.0, "gen_interval_max": 0.0}
 SIGN = {k: s for k, _, s in kfg_replay.FIELDS}
 SIGN.update({"game_lat_p50": -1, "game_lat_p99": -1})
 KEYS = [k for k, _, _ in kfg_replay.FIELDS] + ["game_lat_p50", "game_lat_p99"]
 
 
-def sim_metrics(sim, sc, seed, d):
+def sim_metrics(sim, sc, seed, d, extra=""):
     trace = os.path.join(d, f"{sc['name']}_{seed}.csv")
     srcs = os.path.join(d, f"{sc['name']}_{seed}_src.csv")
-    cmd = [sim] + sc["args"].split() + ["--duration", str(sc["duration"]), "--seed", str(seed), "--trace", trace, "--sources", srcs]
+    cmd = [sim] + sc["args"].split() + extra.split() + ["--duration", str(sc["duration"]), "--seed", str(seed), "--trace", trace, "--sources", srcs]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode:
         raise RuntimeError(f"{cmd}: {p.stderr}")
@@ -94,12 +96,18 @@ def mean(ms):
     out = {}
     for k in KEYS:
         v = [m[k] for m in ms if m.get(k) is not None]
-        out[k] = sum(v) / len(v) if v else None
+        if k.startswith("gen_interval_"):
+            out[k] = max(v) if v else None  # hard limit: the worst run, not the mean
+        else:
+            out[k] = sum(v) / len(v) if v else None
     return out
 
 
 def worse(base, cand):
     bad = []
+    # Hard limit, not relative to the baseline: no interval over min(mult - 1, 2) generated frames.
+    if cand.get("gen_interval_over"):
+        bad.append(f"HARD gen_interval_over {cand['gen_interval_over']:.0f} (max {cand.get('gen_interval_max', 0):.0f})")
     for k in KEYS:
         b, c = base.get(k), cand.get(k)
         if b is None or c is None:
@@ -117,6 +125,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--candidate", required=True)
+    ap.add_argument("--candidate-args", default="", help="extra kfg_sim/kfg_replay arguments for the candidate (e.g. --strict 1)")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--max-duration", type=float, default=600, help="cap scenario durations (s)")
     ap.add_argument("--only")
@@ -142,7 +151,7 @@ def main():
                 os.makedirs(db, exist_ok=True)
                 os.makedirs(dc, exist_ok=True)
                 mb.append(sim_metrics(a.baseline, sc, seed, db))
-                mc.append(sim_metrics(a.candidate, sc, seed, dc))
+                mc.append(sim_metrics(a.candidate, sc, seed, dc, a.candidate_args))
             b, c = mean(mb), mean(mc)
             allb += mb
             allc += mc
@@ -163,7 +172,7 @@ def main():
             for lag in a.me_lag or [None]:
                 name = os.path.basename(ev) + (f" lag{lag}" if lag is not None else "")
                 b = kfg_replay.flat(kfg_replay.metrics(kfg_replay.replay(a.replay_baseline, ev, lag, a.cap)))
-                c = kfg_replay.flat(kfg_replay.metrics(kfg_replay.replay(a.replay_candidate, ev, lag, a.cap)))
+                c = kfg_replay.flat(kfg_replay.metrics(kfg_replay.replay(a.replay_candidate, ev, lag, a.cap, a.candidate_args)))
                 bad = worse(b, c)
                 result["replay"][name] = {"baseline": b, "candidate": c, "worse": bad}
                 print(f"{name[:32]:32s} {'old':4s} {fmt(b)}\n{'':32s} {'new':4s} {fmt(c)}" + (f"\n{'':32s} WORSE: {', '.join(bad)}" if bad else ""))
