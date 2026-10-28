@@ -126,8 +126,9 @@ void main()
 	ivec2 size = u_fullSize;
 	vec4 stats = texelFetch(s_samplers[3], ivec2(0), 0);
 	if (stats.x > 0.5) {
-		// Scene cut: never blend two unrelated images.
-		vec4 c = u_t < 0.5 ? texelFetch(s_samplers[0], p, 0) : texelFetch(s_samplers[1], p, 0);
+		// Scene cut (or a pair motion does not explain): never blend two unrelated images, and
+		// never show B before its own time (GSF 1.5): every phase repeats the real frame A.
+		vec4 c = texelFetch(s_samplers[0], p, 0);
 		imageStore(dst, p, vec4(c.rgb, 1.0));
 		return;
 	}

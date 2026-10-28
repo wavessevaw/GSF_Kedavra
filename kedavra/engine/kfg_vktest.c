@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN, S_ROTATE, S_LINES };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -46,6 +46,10 @@ static const scene SCENES[] = {
 	{ "dolly_stairs", S_DOLLY_STAIRS, 0, 0, true, false },
 	{ "near_object", S_NEAR, 12, 0, true, false },
 	{ "climb", S_CLIMB, 0, 0, true, false },
+	// GSF 1.5: in-plane rotation (4 degrees per frame about the centre, a vehicle rolling or
+	// a top-down turn) and one-pixel lines (wires, fences, UI rules) panning under a HUD.
+	{ "rotation", S_ROTATE, 0, 0, true, false },
+	{ "thin_lines", S_LINES, 9, 3, true, false },
 };
 
 // Low base frame rate (--lowbase): every source interval is 1.25 times longer, so all
@@ -274,6 +278,27 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 			background(x - s->vx * t, y - s->vy * t, 1, rgb);
 		return;
 	}
+	case S_ROTATE: {
+		const double a = -4.0 * 3.14159265358979 / 180.0 * t, cx = 640, cy = 400;
+		const double dx = x - cx, dy = y - cy;
+		background(cx + dx * cos(a) - dy * sin(a), cy + dx * sin(a) + dy * cos(a), 5, rgb);
+		return;
+	}
+	case S_LINES: {
+		if (hud(x, y, w, h, rgb))
+			return;
+		const double u = x - s->vx * t, v = y - s->vy * t;
+		background(u, v, 17, rgb);
+		// One-pixel bright lines every 23 px (vertical) and 31 px (horizontal), box-filtered
+		// so that a sub-pixel position is a partial pixel, as a game renders them.
+		const double fu = fmod(fmod(u, 23.0) + 23.0, 23.0), fv = fmod(fmod(v, 31.0) + 31.0, 31.0);
+		const double cu = fu < 1.0 ? 1.0 - fu : fu > 22.0 ? fu - 22.0 : 0.0;
+		const double cv = fv < 1.0 ? 1.0 - fv : fv > 30.0 ? fv - 30.0 : 0.0;
+		const double c = cu > cv ? cu : cv;
+		for (int k = 0; k < 3; k++)
+			rgb[k] = rgb[k] * (1.0 - c) + 0.95 * c;
+		return;
+	}
 	case S_STATIC:
 		background(x, y, 1, rgb);
 		return;
@@ -362,6 +387,30 @@ static double psnr_region(const uint8_t *a, const uint8_t *b, int w, int h, int 
 		return 0;
 	double mse = se / (double)n;
 	return mse <= 1e-12 ? 99.0 : 10.0 * log10(255.0 * 255.0 / mse);
+}
+
+// Structural similarity of luma (BT.601 weights), 8x8 windows on a 4-pixel step.
+static double ssim(const uint8_t *a, const uint8_t *b, int w, int h)
+{
+	const double C1 = 6.5025, C2 = 58.5225;  // (0.01 * 255)^2, (0.03 * 255)^2
+	double sum = 0;
+	long n = 0;
+	for (int y0 = 0; y0 + 8 <= h; y0 += 4)
+		for (int x0 = 0; x0 + 8 <= w; x0 += 4) {
+			double ma = 0, mb = 0, va = 0, vb = 0, cab = 0;
+			for (int y = y0; y < y0 + 8; y++)
+				for (int x = x0; x < x0 + 8; x++) {
+					const uint8_t *pa = a + 4 * ((size_t)y * w + x), *pb = b + 4 * ((size_t)y * w + x);
+					const double la = 0.299 * pa[0] + 0.587 * pa[1] + 0.114 * pa[2];
+					const double lb = 0.299 * pb[0] + 0.587 * pb[1] + 0.114 * pb[2];
+					ma += la; mb += lb; va += la * la; vb += lb * lb; cab += la * lb;
+				}
+			ma /= 64; mb /= 64;
+			va = va / 64 - ma * ma; vb = vb / 64 - mb * mb; cab = cab / 64 - ma * mb;
+			sum += ((2 * ma * mb + C1) * (2 * cab + C2)) / ((ma * ma + mb * mb + C1) * (va + vb + C2));
+			n++;
+		}
+	return n ? sum / n : 1.0;
 }
 
 // Screen border metric, independent of the layout scaling used by object regions.
@@ -681,7 +730,7 @@ static int hdr_checks(kfg_vk *vk, int w, int h, int transfer, FILE *js)
 					gain = g;
 				if (g < 3.0) { ok = false; why = "not better than blend/duplicate by 3 dB"; }
 			} else if (s->cut) {
-				if (max_abs(G, D, nbytes) > 0) { ok = false; why = "scene cut blended"; }
+				if (max_abs(G, A, nbytes) > 0) { ok = false; why = "scene cut not the real frame A"; }
 			} else {
 				if (max_abs(G, A, nbytes) > 1) { ok = false; why = "static scene changed"; }
 				// The float values themselves, highlights above 1.0 included (scRGB).
@@ -825,7 +874,7 @@ int main(int argc, char **argv)
 	const double *phases = g_lowbase ? phases_lb : phases_x3;
 	for (size_t si = 0; si < sizeof(SCENES) / sizeof(SCENES[0]); si++) {
 		scene sc = SCENES[si];
-		if (getenv("KFG_PANV") && sc.kind == S_PAN)
+		if (getenv("KFG_PANV") && (sc.kind == S_PAN || sc.kind == S_LINES))
 			sscanf(getenv("KFG_PANV"), "%lf,%lf", &sc.vx, &sc.vy);  // tuning aid: pan speed override
 		const scene *s = &sc;
 		if (only && strcmp(only, s->name))
@@ -958,8 +1007,8 @@ int main(int argc, char **argv)
 				ol = psnr_region(L, T, w, h, 380, 380, 900, h);
 				od = psnr_region(D, T, w, h, 380, 380, 900, h);
 			}
-			double hud_err = s->kind == S_OBJECTS ? mean_abs(G, T, w, h, 40, 30, 360, 70) : 0.0;
-			int maxd = max_abs(G, s->cut ? D : A, nbytes);
+			double hud_err = s->kind == S_OBJECTS || s->kind == S_LINES ? mean_abs(G, T, w, h, 40, 30, 360, 70) : 0.0;
+			int maxd = max_abs(G, A, nbytes);  // a cut repeats the real frame A at every phase
 			bool ok = true;
 			const char *why = "";
 			if (s->dynamic) {
@@ -968,7 +1017,7 @@ int main(int argc, char **argv)
 				if (!(ma > 0.5 && mb > 0.5)) { ok = false; why = "output equals a source frame"; }
 				if (hud_err > 2.0) { ok = false; why = "HUD distorted"; }
 			} else if (s->cut) {
-				if (maxd > 0) { ok = false; why = "scene cut blended"; }
+				if (maxd > 0) { ok = false; why = "scene cut not the real frame A"; }
 			} else {
 				if (maxd > 1) { ok = false; why = "static scene changed"; }
 			}
@@ -977,11 +1026,12 @@ int main(int argc, char **argv)
 			const bool known = s->kind == S_CLIMB;
 			if (!ok && !known)
 				failures++;
-			printf("  t=%.3f gen=%.2fdB blend=%.2fdB dup=%.2fdB region gen/blend/dup=%.2f/%.2f/%.2f |G-A|=%.2f |G-B|=%.2f hud=%.2f %s%s\n",
-			       t, pg, pl, pd, og, ol, od, ma, mb, hud_err, ok ? "PASS" : known ? "OPEN (not gated): " : "FAIL: ", why);
+			const double sg = ssim(G, T, w, h), sd = ssim(D, T, w, h), pbd = psnr_border(G, T, w, h);
+			printf("  t=%.3f gen=%.2fdB blend=%.2fdB dup=%.2fdB region gen/blend/dup=%.2f/%.2f/%.2f |G-A|=%.2f |G-B|=%.2f hud=%.2f ssim gen/dup=%.4f/%.4f border=%.2fdB %s%s\n",
+			       t, pg, pl, pd, og, ol, od, ma, mb, hud_err, sg, sd, pbd, ok ? "PASS" : known ? "OPEN (not gated): " : "FAIL: ", why);
 			if (js)
-				fprintf(js, "   {\"t\": %.6f, \"psnr_gen\": %.3f, \"psnr_border\": %.3f, \"psnr_blend\": %.3f, \"psnr_dup\": %.3f, \"region_gen\": %.3f, \"region_blend\": %.3f, \"region_dup\": %.3f, \"mean_abs_vs_A\": %.3f, \"mean_abs_vs_B\": %.3f, \"hud_err\": %.3f, \"pass\": %s}%s\n",
-					t, pg, psnr_border(G, T, w, h), pl, pd, og, ol, od, ma, mb, hud_err, ok ? "true" : "false", pi < 2 ? "," : "");
+				fprintf(js, "   {\"t\": %.6f, \"psnr_gen\": %.3f, \"psnr_border\": %.3f, \"psnr_blend\": %.3f, \"psnr_dup\": %.3f, \"region_gen\": %.3f, \"region_blend\": %.3f, \"region_dup\": %.3f, \"mean_abs_vs_A\": %.3f, \"mean_abs_vs_B\": %.3f, \"hud_err\": %.3f, \"ssim_gen\": %.5f, \"ssim_dup\": %.5f, \"pass\": %s}%s\n",
+					t, pg, pbd, pl, pd, og, ol, od, ma, mb, hud_err, sg, sd, ok ? "true" : "false", pi < 2 ? "," : "");
 			char name[128];
 			snprintf(name, sizeof(name), "%s_t%03d_gen", s->name, (int)lrint(t * 1000));
 			write_ppm(out_dir, name, G, w, h);
