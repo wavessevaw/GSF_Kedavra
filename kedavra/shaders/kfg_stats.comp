@@ -4,7 +4,7 @@
 // Output: x = cut (0/1), y = fraction of blocks badly explained by motion,
 //         z = mean motion-compensated error, w = mean zero-motion error.
 // With KFG_FLAG_GLOBAL: slot 0 = coarsest flow; writes the forward and backward camera
-// motion as affine fields (see camera() and kfg_global_at) to texels 1 to 3.
+// motion as plane projective maps (see camera() and kfg_global_at) to texels 1 to 4.
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "kfg_common.glsl"
@@ -14,6 +14,16 @@ layout(local_size_x = 256) in;
 shared float s_bad[256];
 shared float s_mc[256];
 shared float s_zero[256];
+
+// The camera fit reads every block of its field, or every n-th in both directions (u_radius:
+// the field of level 2 is refitted on a quarter of its blocks).
+int g_step = 1;
+ivec2 g_grid;
+int g_n;
+ivec2 grid_at(int i)
+{
+	return ivec2(i % g_grid.x, i / g_grid.x) * g_step;
+}
 
 #define GBINS 64          // 8-pixel bins, +-256 pixels
 shared uint s_hist[GBINS * GBINS];
@@ -26,8 +36,8 @@ vec2 dominant(uint lid, ivec2 size, bool backward)
 	for (uint i = lid; i < uint(GBINS * GBINS); i += 256u)
 		s_hist[i] = 0u;
 	barrier();
-	for (int i = int(lid); i < size.x * size.y; i += 256) {
-		vec4 f = texelFetch(s_samplers[0], ivec2(i % size.x, i / size.x), 0);
+	for (int i = int(lid); i < g_n; i += 256) {
+		vec4 f = texelFetch(s_samplers[0], grid_at(i), 0);
 		vec2 v = backward ? f.zw : f.xy;
 		ivec2 b = ivec2(floor(v / 8.0 + 0.5)) + GBINS / 2;
 		if (all(greaterThanEqual(b, ivec2(0))) && all(lessThan(b, ivec2(GBINS))))
@@ -54,8 +64,8 @@ vec2 dominant(uint lid, ivec2 size, bool backward)
 	for (int it = 0; it < 2; it++) {
 		float win = it == 0 ? 6.0 : 3.0;
 		vec3 acc = vec3(0.0);
-		for (int i = int(lid); i < size.x * size.y; i += 256) {
-			vec4 f = texelFetch(s_samplers[0], ivec2(i % size.x, i / size.x), 0);
+		for (int i = int(lid); i < g_n; i += 256) {
+			vec4 f = texelFetch(s_samplers[0], grid_at(i), 0);
 			vec2 v = backward ? f.zw : f.xy;
 			if (all(lessThanEqual(abs(v - r), vec2(win))))
 				acc += vec3(v, 1.0);
@@ -74,19 +84,18 @@ vec2 dominant(uint lid, ivec2 size, bool backward)
 	return r;
 }
 
-// Camera motion as a translation plus a zoom, v(d) = c + s d over the offset d from the
-// image centre: a turn is mostly the translation, walking forward or up stairs is the zoom,
+// Camera motion, first as a translation plus a zoom, v(d) = c + s d over the offset d from the
+// image centre: a pan is mostly the translation, walking forward or up stairs is the zoom,
 // where the steps near the camera move fastest. One zoom for both axes keeps it measurable
 // on slanted, repeating texture (steps), where a free affine field follows the aliases.
 // Grown from the dominant translation by refitting to the vectors within a shrinking distance
 // of the current model, so objects, the HUD and aliased matches stay outliers. The histogram
-// is free by now and holds the 7 sums per thread. Stored as an affine field (see
-// kfg_global_at): centre motion c, gradient (s h.x, 0, 0, s h.y) per half image.
+// is free by now and holds the 7 sums per thread.
 #define NSUM 7u
-void camera(uint lid, ivec2 size, bool backward, out vec2 c, out vec4 m)
+void camera_tz(uint lid, ivec2 size, bool backward, out vec2 c, out float zoom)
 {
 	c = dominant(lid, size, backward);
-	float zoom = 0.0;
+	zoom = 0.0;
 	const vec2 half_size = 0.5 * vec2(u_fullSize);
 	const vec2 scale = vec2(u_fullSize) / vec2(size);
 	const float wins[4] = float[4](8.0, 6.0, 4.0, 3.0);
@@ -94,8 +103,8 @@ void camera(uint lid, ivec2 size, bool backward, out vec2 c, out vec4 m)
 		float a[NSUM];
 		for (uint k = 0u; k < NSUM; k++)
 			a[k] = 0.0;
-		for (int i = int(lid); i < size.x * size.y; i += 256) {
-			ivec2 q = ivec2(i % size.x, i / size.x);
+		for (int i = int(lid); i < g_n; i += 256) {
+			ivec2 q = grid_at(i);
 			vec4 f = texelFetch(s_samplers[0], q, 0);
 			vec2 v = backward ? f.zw : f.xy;
 			vec2 d = (vec2(q) + 0.5) * scale - half_size;
@@ -119,7 +128,7 @@ void camera(uint lid, ivec2 size, bool backward, out vec2 c, out vec4 m)
 			t[k] = uintBitsToFloat(s_hist[k]);
 		barrier();
 		const float n = t[0];
-		if (n < 0.1 * float(size.x * size.y))
+		if (n < 0.1 * float(g_n))
 			break;  // too few blocks follow the camera: keep the last model
 		mat3 g = mat3(n, 0.0, t[1], 0.0, n, t[2], t[1], t[2], t[3]);
 		// The inliers must spread around their mean for a zoom to be measurable.
@@ -132,21 +141,258 @@ void camera(uint lid, ivec2 size, bool backward, out vec2 c, out vec4 m)
 			zoom = 0.0;
 		}
 	}
-	m = vec4(zoom * half_size.x, 0.0, 0.0, zoom * half_size.y);
+}
+
+// Then, as GSF 1.4.3, the full plane projective map a camera rotation makes: refined from the
+// translation and zoom by refitting (linear least squares on the map's 8 entries) to the
+// vectors within a shrinking distance of the current map, and kept only when clearly more
+// blocks follow it (a turn) than the translation and zoom: on repeating texture (stairs) and
+// for a plain pan the simple model stays. Sums are reduced 15 at a time in the histogram.
+float g_h[8];          // the current map, absolute entries
+shared float s_sol[9];  // the solved map and its inlier count
+
+vec2 map_motion(vec2 u, float hx)
+{
+	float den = g_h[6] * u.x + g_h[7] * u.y + 1.0;
+	vec2 m = vec2(g_h[0] * u.x + g_h[1] * u.y + g_h[2], g_h[3] * u.x + g_h[4] * u.y + g_h[5]);
+	m = abs(den) > 0.05 ? m / den : u;
+	return (m - u) * hx;
+}
+
+// Normal equations of the 8 entries over the blocks within win of the current map, and the
+// count of those blocks. The 8x8 system has only 23 distinct sums (u = (x, y) the block, t its
+// target): n, x, y, xx, xy, yy, then those of x, y, xx, xy, yy weighted by t.x and by t.y (with
+// t.x and t.y themselves), and xx, xy, yy, x, y weighted by |t|^2. One pass over the blocks,
+// reduced in the histogram in two batches.
+#define NMAP 23u
+float g_s[NMAP];
+void map_sums(uint lid, ivec2 size, bool backward, float win)
+{
+	const vec2 half_size = 0.5 * vec2(u_fullSize);
+	const vec2 scale = vec2(u_fullSize) / vec2(size);
+	float a[NMAP];
+	for (uint k = 0u; k < NMAP; k++)
+		a[k] = 0.0;
+	for (int i = int(lid); i < g_n; i += 256) {
+		ivec2 q = grid_at(i);
+		vec4 f = texelFetch(s_samplers[0], q, 0);
+		vec2 v = backward ? f.zw : f.xy;
+		vec2 u = ((vec2(q) + 0.5) * scale - half_size) / half_size.x;
+		if (any(greaterThan(abs(v - map_motion(u, half_size.x)), vec2(win))))
+			continue;
+		vec2 t = u + v / half_size.x;
+		const float x = u.x, y = u.y, xx = x * x, xy = x * y, yy = y * y, r2 = dot(t, t);
+		a[0] += 1.0; a[1] += x; a[2] += y; a[3] += xx; a[4] += xy; a[5] += yy;
+		a[6] += t.x; a[7] += x * t.x; a[8] += y * t.x; a[9] += xx * t.x; a[10] += xy * t.x; a[11] += yy * t.x;
+		a[12] += t.y; a[13] += x * t.y; a[14] += y * t.y; a[15] += xx * t.y; a[16] += xy * t.y; a[17] += yy * t.y;
+		a[18] += x * r2; a[19] += y * r2; a[20] += xx * r2; a[21] += xy * r2; a[22] += yy * r2;
+	}
+	for (uint b = 0u; b < 2u; b++) {
+		const uint o = 12u * b, m = b == 0u ? 12u : NMAP - 12u;
+		for (uint k = 0u; k < m; k++)
+			s_hist[lid * 12u + k] = floatBitsToUint(a[o + k]);
+		barrier();
+		for (uint s = 128u; s > 0u; s >>= 1) {
+			if (lid < s)
+				for (uint k = 0u; k < m; k++)
+					s_hist[lid * 12u + k] = floatBitsToUint(uintBitsToFloat(s_hist[lid * 12u + k]) + uintBitsToFloat(s_hist[(lid + s) * 12u + k]));
+			barrier();
+		}
+		for (uint k = 0u; k < m; k++)
+			g_s[o + k] = uintBitsToFloat(s_hist[k]);
+		barrier();
+	}
+}
+
+// Blocks within win of the current map (the model selection's count).
+float map_count(uint lid, ivec2 size, bool backward, float win)
+{
+	const vec2 half_size = 0.5 * vec2(u_fullSize);
+	const vec2 scale = vec2(u_fullSize) / vec2(size);
+	float n = 0.0;
+	for (int i = int(lid); i < g_n; i += 256) {
+		ivec2 q = grid_at(i);
+		vec4 f = texelFetch(s_samplers[0], q, 0);
+		vec2 v = backward ? f.zw : f.xy;
+		vec2 u = ((vec2(q) + 0.5) * scale - half_size) / half_size.x;
+		n += all(lessThanEqual(abs(v - map_motion(u, half_size.x)), vec2(win))) ? 1.0 : 0.0;
+	}
+	s_bad[lid] = n;
+	barrier();
+	for (uint s = 128u; s > 0u; s >>= 1) {
+		if (lid < s)
+			s_bad[lid] += s_bad[lid + s];
+		barrier();
+	}
+	n = s_bad[0];
+	barrier();
+	return n;
+}
+
+// Solve the normal equations (thread 0, Gaussian elimination with partial pivoting) with a
+// small ridge on the projective entries towards the current map; false when singular.
+bool map_solve()
+{
+	float m[8][9];
+	for (int r = 0; r < 8; r++)
+		for (int c = 0; c < 9; c++)
+			m[r][c] = 0.0;
+	const float n = g_s[0], x = g_s[1], y = g_s[2], xx = g_s[3], xy = g_s[4], yy = g_s[5];
+	const float A[3][3] = float[3][3](float[3](xx, xy, x), float[3](xy, yy, y), float[3](x, y, n));
+	for (int r = 0; r < 3; r++)
+		for (int c = 0; c < 3; c++) {
+			m[r][c] = A[r][c];
+			m[r + 3][c + 3] = A[r][c];
+		}
+	// Rows 0-2 and 3-5 against the projective entries: -(x, y, 1)^T (x, y) weighted by t.x, t.y.
+	for (int k = 0; k < 2; k++) {
+		const int o = 6 + 6 * k;   // g_s[o]: t, then x t, y t, xx t, xy t, yy t
+		const float P[3][2] = float[3][2](float[2](g_s[o + 3], g_s[o + 4]), float[2](g_s[o + 4], g_s[o + 5]),
+		                                  float[2](g_s[o + 1], g_s[o + 2]));
+		for (int r = 0; r < 3; r++)
+			for (int c = 0; c < 2; c++) {
+				m[3 * k + r][6 + c] = -P[r][c];
+				m[6 + c][3 * k + r] = -P[r][c];
+			}
+		m[3 * k][8] = g_s[o + 1];
+		m[3 * k + 1][8] = g_s[o + 2];
+		m[3 * k + 2][8] = g_s[o];
+	}
+	m[6][6] = g_s[20]; m[6][7] = g_s[21]; m[7][6] = g_s[21]; m[7][7] = g_s[22];
+	m[6][8] = -g_s[18]; m[7][8] = -g_s[19];
+	for (int r = 6; r < 8; r++) {
+		m[r][r] += 1e-3 * n;
+		m[r][8] += 1e-3 * n * g_h[r];
+	}
+	for (int c = 0; c < 8; c++) {
+		int piv = c;
+		for (int r = c + 1; r < 8; r++)
+			piv = abs(m[r][c]) > abs(m[piv][c]) ? r : piv;
+		if (abs(m[piv][c]) < 1e-6 * max(n, 1.0))
+			return false;
+		for (int j = 0; j < 9; j++) {
+			float tmp = m[c][j];
+			m[c][j] = m[piv][j];
+			m[piv][j] = tmp;
+		}
+		for (int r = 0; r < 8; r++) {
+			if (r == c)
+				continue;
+			float f = m[r][c] / m[c][c];
+			for (int j = c; j < 9; j++)
+				m[r][j] -= f * m[c][j];
+		}
+	}
+	for (int r = 0; r < 8; r++)
+		g_h[r] = m[r][8] / m[r][r];
+	return true;
+}
+
+void camera(uint lid, ivec2 size, bool backward, out vec4 ha, out vec4 hb)
+{
+	vec2 c;
+	float zoom;
+	camera_tz(lid, size, backward, c, zoom);
+	const vec2 half_size = 0.5 * vec2(u_fullSize);
+	// The translation and zoom as a map: x' = (1 + s) x + c.x / hx (about the centre).
+	float tz[8] = float[8](1.0 + zoom, 0.0, c.x / half_size.x, 0.0, 1.0 + zoom, c.y / half_size.x, 0.0, 0.0);
+	for (int k = 0; k < 8; k++)
+		g_h[k] = tz[k];
+	const float wins[5] = float[5](24.0, 16.0, 10.0, 6.0, 4.0);
+	float n_tz = 0.0, n_h = 0.0;
+	bool ok = true;
+	for (int it = 0; it < 5 && ok; it++) {
+		map_sums(lid, size, backward, wins[it]);
+		if (g_s[0] < 0.1 * float(g_n)) {
+			ok = false;
+			break;
+		}
+		if (lid == 0u) {
+			bool solved = map_solve();
+			for (int k = 0; k < 8; k++)
+				s_sol[k] = g_h[k];
+			s_sol[8] = solved ? 1.0 : 0.0;
+		}
+		barrier();
+		ok = s_sol[8] > 0.5;
+		for (int k = 0; k < 8; k++)
+			g_h[k] = s_sol[k];
+		barrier();
+	}
+	if (ok) {
+		n_h = map_count(lid, size, backward, 3.0);
+		for (int k = 0; k < 8; k++)
+			s_sol[k] = g_h[k];
+		for (int k = 0; k < 8; k++)
+			g_h[k] = tz[k];
+		n_tz = map_count(lid, size, backward, 3.0);
+		for (int k = 0; k < 8; k++)
+			g_h[k] = s_sol[k];
+		// A turn: clearly more blocks follow the projective map.
+		ok = n_h > 1.15 * n_tz + 0.01 * float(g_n);
+	}
+	if (!ok)
+		for (int k = 0; k < 8; k++)
+			g_h[k] = tz[k];
+	ha = vec4(g_h[0] - 1.0, g_h[1], g_h[2], g_h[3]);
+	hb = vec4(g_h[4] - 1.0, g_h[5], g_h[6], g_h[7]);
+}
+
+// The log of the forward map, for the warp's phase t map F^t = exp(t log F) (a turn's
+// rotation by t of the angle). F is scaled to determinant 1 (a map is defined up to scale), so
+// log F has trace 0 and 8 entries are kept: (l00, l01, l02, l10), (l11, l12, l20, l21). Three
+// square roots (Denman-Beavers) bring F near the identity, where a short series is exact
+// enough. A mirrored or collapsing map has no log: zero (no camera motion for the warp).
+mat3 msqrt(mat3 a)
+{
+	mat3 y = a, z = mat3(1.0);
+	for (int i = 0; i < 6; i++) {
+		mat3 yi = inverse(y);
+		y = 0.5 * (y + inverse(z));
+		z = 0.5 * (z + yi);
+	}
+	return y;
+}
+
+void map_log(vec4 fa, vec4 fb, out vec4 la, out vec4 lb)
+{
+	la = vec4(0.0);
+	lb = vec4(0.0);
+	// GLSL matrices are column-major: mat3(column 0, column 1, column 2).
+	mat3 F = mat3(fa.x + 1.0, fa.w, fb.z,
+		      fa.y, fb.x + 1.0, fb.w,
+		      fa.z, fb.y, 1.0);
+	float d = determinant(F);
+	if (d < 0.2)
+		return;
+	F *= 1.0 / pow(d, 1.0 / 3.0);
+	mat3 x = msqrt(msqrt(msqrt(F))) - mat3(1.0);
+	mat3 x2 = x * x;
+	mat3 l = 8.0 * (x - 0.5 * x2 + (1.0 / 3.0) * x2 * x - 0.25 * x2 * x2);
+	// l[c][r]: column c, row r.
+	la = vec4(l[0][0], l[1][0], l[2][0], l[0][1]);
+	lb = vec4(l[1][1], l[2][1], l[0][2], l[1][2]);
 }
 
 void main()
 {
 	uint lid = gl_LocalInvocationID.x;
 	if ((u_flags & KFG_FLAG_GLOBAL) != 0) {
-		vec2 cf, cb;
-		vec4 mf, mb;
-		camera(lid, u_srcSize, false, cf, mf);
-		camera(lid, u_srcSize, true, cb, mb);
+		g_step = max(u_radius, 1);
+		g_grid = (u_srcSize + g_step - 1) / g_step;
+		g_n = g_grid.x * g_grid.y;
+		vec4 fa, fb, ba, bb;
+		camera(lid, u_srcSize, false, fa, fb);
+		camera(lid, u_srcSize, true, ba, bb);
 		if (lid == 0u) {
-			imageStore(dst, KFG_GLOBAL_TEXEL, vec4(cf, cb));
-			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(1, 0), mf);
-			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(2, 0), mb);
+			imageStore(dst, KFG_GLOBAL_TEXEL, fa);
+			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(1, 0), fb);
+			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(2, 0), ba);
+			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(3, 0), bb);
+			vec4 la, lb;
+			map_log(fa, fb, la, lb);
+			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(4, 0), la);
+			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(5, 0), lb);
 		}
 		return;
 	}

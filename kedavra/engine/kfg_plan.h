@@ -66,7 +66,7 @@ enum kfg_role {
 	KFG_ROLE_COLOR,     // source colour of a frame (host-owned, e.g. a compositor commit)
 	KFG_ROLE_LUMA,      // luma pyramid of a frame; level 1..4
 	KFG_ROLE_FLOW,      // bidirectional flow of a pair; level 2..4
-	KFG_ROLE_STATS,     // 4x1 pair statistics: texel 0 cut test, texels 1-3 camera motion (affine)
+	KFG_ROLE_STATS,     // 7x1 pair statistics: texel 0 cut test, texels 1-4 camera motion (two projective maps), 5-6 log of the forward map
 	KFG_ROLE_SELECT,    // selection field scratch (select and repair ping-pong)
 	KFG_ROLE_PAIR_SELECT, // a pair's selection field at mid-phase (ring-indexed like FLOW)
 	KFG_ROLE_OUTPUT,    // generated output (host-owned)
@@ -366,13 +366,29 @@ static inline void kfg_plan_analyze(kfg_plan *p, uint32_t w, uint32_t h, uint32_
 			x->params.full_size[0] = (int32_t)w;
 			x->params.full_size[1] = (int32_t)h;
 			x->params.flags = KFG_FLAG_GLOBAL;
-			x->params.dst_size[0] = 4;
+			x->params.dst_size[0] = 7;
 			x->params.dst_size[1] = 1;
 			x->groups[0] = 1;
 			x->groups[1] = 1;
 		}
 	}
-	kfg_pass *x = kfg_plan_add(p, KFG_SHADER_STATS, kfg_ref(KFG_ROLE_STATS, pr, 0), "stats");
+	// The camera motion again from the finest field (GSF 1.4.3): the coarsest one is quantised
+	// to 8 pixels and wrong at the sides of a fast turn, where the map matters most. Used by
+	// the selection, the warp and the next pair's coarsest search.
+	kfg_pass *x = kfg_plan_add(p, KFG_SHADER_STATS, kfg_ref(KFG_ROLE_STATS, pr, 0), "global");
+	x->slots[0] = kfg_ref(KFG_ROLE_FLOW, pr, 2);
+	x->nslots = 1;
+	x->params.src_size[0] = (int32_t)sz[2][0];
+	x->params.src_size[1] = (int32_t)sz[2][1];
+	x->params.full_size[0] = (int32_t)w;
+	x->params.full_size[1] = (int32_t)h;
+	x->params.radius = 2;  // every second block in both directions
+	x->params.flags = KFG_FLAG_GLOBAL;
+	x->params.dst_size[0] = 7;
+	x->params.dst_size[1] = 1;
+	x->groups[0] = 1;
+	x->groups[1] = 1;
+	x = kfg_plan_add(p, KFG_SHADER_STATS, kfg_ref(KFG_ROLE_STATS, pr, 0), "stats");
 	x->slots[0] = kfg_ref(KFG_ROLE_LUMA, fa, 2);
 	x->slots[1] = kfg_ref(KFG_ROLE_LUMA, fb, 2);
 	x->slots[2] = kfg_ref(KFG_ROLE_FLOW, pr, 2);
