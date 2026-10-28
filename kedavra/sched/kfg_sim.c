@@ -70,6 +70,8 @@ typedef struct params {
 	double fg_slowdown;      // fractional slowdown of the game while generation runs
 	double vblank_jitter_us;
 	double cut_prob;         // per-source probability of a scene cut
+	double aligned;          // 1: the stock limiter (a frame latches only on the first vblank of a slot)
+	double pipelined;        // 1: the game renders its next frame while one waits to be latched
 	double me_min_vblanks;   // analysis usable no earlier than this many vblanks after the latch
 	                         // (2: the analysis split over two submissions, GSF 1.4.1)
 	double duration_s;
@@ -86,7 +88,7 @@ static void usage(void)
 		"kfg_sim [--refresh HZ] [--mult N] [--cap FPS] [--game-ms MS] [--game-p99-ms MS]\n"
 		"        [--spike-prob P] [--spike-ms MS] [--me-ms MS] [--me-p99-ms MS] [--me-min-vblanks N] [--warp-ms MS]\n"
 		"        [--compose-ms MS] [--compose-p99-ms MS] [--redzone-ms MS] [--fg-slowdown F]\n"
-		"        [--cut-prob P] [--duration S] [--seed N] [--event T:what:value]... --trace out.csv [--sources out.csv]\n"
+		"        [--aligned 0|1] [--pipelined 0|1] [--cut-prob P] [--duration S] [--seed N] [--event T:what:value]... --trace out.csv [--sources out.csv]\n"
 		"events: cap, mult, off, on, refresh, gap (ms of no game output), me_scale, game_ms\n");
 }
 
@@ -108,6 +110,7 @@ static int parse(int argc, char **argv, params *p)
 		NUM("--compose-ms", compose_ms) NUM("--compose-p99-ms", compose_p99_ms)
 		NUM("--redzone-ms", redzone_ms) NUM("--fg-slowdown", fg_slowdown)
 		NUM("--vblank-jitter-us", vblank_jitter_us) NUM("--duration", duration_s) NUM("--cut-prob", cut_prob) NUM("--me-min-vblanks", me_min_vblanks)
+		NUM("--aligned", aligned) NUM("--pipelined", pipelined)
 #undef NUM
 		if (!strcmp(a, "--mult") && v) { p->mult = (uint32_t)atoi(v); i++; continue; }
 		if (!strcmp(a, "--seed") && v) { p->seed = strtoull(v, NULL, 10); i++; continue; }
@@ -219,27 +222,38 @@ int main(int argc, char **argv)
 			g.done_ns = g.start_ns + x * 1e6;
 			g.in_flight = true;
 		}
-		if (g.in_flight && g.done_ns <= wake_ns) {
+		if (g.in_flight && g.done_ns <= wake_ns && !g.queued_done) {
 			g.in_flight = false;
 			g.queued_done = true;
 			g.queued_id = g.next_id++;
 			g.queued_done_ns = g.done_ns;
+			if (p.pipelined > 0) {
+				// The next frame starts when this one is done, not when it is latched.
+				double x = rng_lognormal(&r, p.game_ms, p.game_p99_ms);
+				if (rng_unit(&r) < p.spike_prob)
+					x += p.spike_ms;
+				if (fg_on)
+					x *= 1.0 + p.fg_slowdown;
+				// It waited behind a frame not latched yet: it starts once that one queued.
+				g.start_ns = g.queued_done_ns > wake_ns - refresh_ns ? g.queued_done_ns : wake_ns;
+				g.done_ns = g.start_ns + x * 1e6;
+				g.in_flight = true;
+			}
 		}
 
 		// The compositor tells the scheduler the cap's cadence every vblank.
 		kfg_sched_set_cadence(&s, (uint32_t)llround(p.refresh_hz), p.cap_fps > 0 ? (uint32_t)llround(p.cap_fps) : 0u);
 
 		// Compositor wake for vblank k: latch (FIFO limiter), analysis, decision.
-		// Gamescope's limiter: a whole divisor of the refresh releases every n-th vblank; a cap
-		// that does not divide it (40 at 90 Hz) releases on the vblanks where cap / refresh
-		// steps (2, 2, 2, 3, ...), as the KEDAVRA hook in steamcompmgr does.
+		// The KEDAVRA limiter in steamcompmgr: one frame per slot of the cap (40 at 90 Hz:
+		// 2, 2, 2, 3 vblanks), latched on any vblank of a slot that has none yet. --aligned 1
+		// models the stock limiter: a frame latches only on the first vblank of a slot, so a
+		// frame that misses it waits a whole slot.
 		bool released = true;
 		if (p.cap_fps > 0 && p.cap_fps < p.refresh_hz) {
 			const int64_t T = llround(p.cap_fps), R = llround(p.refresh_hz);
-			if (R % T == 0)
-				released = k >= last_latch + R / T;
-			else
-				released = last_latch < 0 || (k * T) / R != (last_latch * T) / R;
+			const bool slot_free = last_latch < 0 || (k * T) / R > (last_latch * T) / R;
+			released = slot_free && (p.aligned <= 0 || (k * T) / R != ((k - 1) * T) / R);
 		}
 		if (g.queued_done && released) {
 			kfg_sched_on_latch(&s, g.queued_id, k);
@@ -255,16 +269,19 @@ int main(int argc, char **argv)
 				ready_k++;
 			kfg_sched_on_me(&s, g.queued_id, ready_k, true, rng_unit(&r) < p.cut_prob);
 			g.queued_done = false;
-			// The game may start its next frame right away (one frame queued).
-			double x = rng_lognormal(&r, p.game_ms, p.game_p99_ms);
-			if (rng_unit(&r) < p.spike_prob)
-				x += p.spike_ms;
-			if (fg_on)
-				x *= 1.0 + p.fg_slowdown;
-			double start = wake_ns > g.resume_ns ? wake_ns : g.resume_ns;
-			g.start_ns = start;
-			g.done_ns = start + x * 1e6;
-			g.in_flight = true;
+			// Pipelined: the frame behind it is already rendering (it queues on the next wake).
+			if (p.pipelined <= 0) {
+				// The game may start its next frame right away (one frame queued).
+				double x = rng_lognormal(&r, p.game_ms, p.game_p99_ms);
+				if (rng_unit(&r) < p.spike_prob)
+					x += p.spike_ms;
+				if (fg_on)
+					x *= 1.0 + p.fg_slowdown;
+				double start = wake_ns > g.resume_ns ? wake_ns : g.resume_ns;
+				g.start_ns = start;
+				g.done_ns = start + x * 1e6;
+				g.in_flight = true;
+			}
 		}
 
 		kfg_decision d;
