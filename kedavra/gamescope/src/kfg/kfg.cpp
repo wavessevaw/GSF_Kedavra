@@ -104,6 +104,14 @@ namespace kfg
 		bool bBypass;          // the composite did not apply the decision
 		uint64_t ulRefreshNs;
 		uint32_t uMultiplier;
+		// Source timing for offline replay (kfg_replay): the newest source latched since the
+		// previous row (0: none), its latch vblank and the first vblank its pair may be used,
+		// the base cap told to the scheduler, and the decisions made since the previous row.
+		uint64_t ulLatchID;
+		int64_t nLatchVBlank;
+		int64_t nMeReady;
+		uint32_t uCapFps;
+		uint32_t uDecisions;
 	};
 
 	struct State_t
@@ -150,6 +158,10 @@ namespace kfg
 		uint64_t ulPendingID = 0;
 		int64_t nPendingVBlank = 0;
 		kfg_decision pending{};
+		// Trace: source timing since the last trace row (TraceRow_t).
+		uint64_t ulTraceLatchID = 0;
+		int64_t nTraceLatchVBlank = 0, nTraceMeReady = 0;
+		uint32_t uTraceCapFps = 0, uTraceDecisions = 0;
 
 		// Counters (status file).
 		uint64_t ulPaints = 0, ulApplied = 0, ulBypass = 0, ulRingMiss = 0, ulUnsupported = 0;
@@ -881,10 +893,10 @@ namespace kfg
 		const kfg_decision &d = row.decision;
 		const char *pszKind = row.bBypass ? "repeat" : kfg_show_name( d.show );
 		const char *pszReason = row.bBypass ? "bypass" : kfg_reason_name( d.reason );
-		fprintf( pFile, "%" PRId64 ",%" PRIu64 ",%s,%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRId64 ",%" PRId64 ",%s,%s,%" PRIu64 ",%u,0,%d,%.3f\n",
+		fprintf( pFile, "%" PRId64 ",%" PRIu64 ",%s,%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRId64 ",%" PRId64 ",%s,%s,%" PRIu64 ",%u,0,%d,%.3f,%" PRIu64 ",%" PRId64 ",%" PRId64 ",%u,%u\n",
 			row.nVBlank, row.ulFlipNs, pszKind, d.src_a, d.src_b, d.phase_num, d.phase_den, d.content, d.delay,
 			pszReason, kfg_state_name( d.state ), row.ulRefreshNs, row.uMultiplier, d.skipped ? 1 : 0,
-			double( d.pos ) / KFG_SCHED_SUB );
+			double( d.pos ) / KFG_SCHED_SUB, row.ulLatchID, row.nLatchVBlank, row.nMeReady, row.uCapFps, row.uDecisions );
 	}
 
 	static void TraceWriterMain()
@@ -921,7 +933,7 @@ namespace kfg
 					pFile = fopen( sPath.c_str(), "w" );
 					if ( pFile )
 					{
-						fprintf( pFile, "vblank,flip_ns,kind,src_a,src_b,phase_num,phase_den,content,delay,reason,state,refresh_ns,mult,compose_late,skipped,pos\n" );
+						fprintf( pFile, "vblank,flip_ns,kind,src_a,src_b,phase_num,phase_den,content,delay,reason,state,refresh_ns,mult,compose_late,skipped,pos,latch_id,latch_vblank,me_ready,cap_fps,decisions\n" );
 						kfg_log.infof( "trace: %s", sPath.c_str() );
 					}
 					else
@@ -992,7 +1004,8 @@ namespace kfg
 			"\"post\":\"%s\",\"post_active\":%s,\"post_error\":\"%s\",\"post_frames\":%" PRIu64 ",\"post_skipped\":%" PRIu64 ","
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ",\"analysis_one_pass\":%s,"
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
-			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u}\n",
+			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,"
+			"\"real_missed\":%" PRIu64 ",\"jumps\":%" PRIu64 ",\"slowdowns\":%" PRIu64 ",\"speedups\":%" PRIu64 "}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1010,7 +1023,8 @@ namespace kfg
 			s.flPostUsLast, s.ulPostSamples ? s.flPostUsSum / double( s.ulPostSamples ) : 0.0,
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs, s.bAnalysisOnePass ? "true" : "false",
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
-			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight );
+			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight,
+			q.n_real_missed, q.n_jump, q.n_slow, q.n_fast );
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1249,9 +1263,14 @@ namespace kfg
 			const double flPeriodUs = 1e6 / double( std::max( 1, RefreshHz() ) );
 			s.bAnalysisOnePass = s.flAnalysisUsEma < flPeriodUs / 3.0 && s.flAnalysisUsLast < flPeriodUs / 2.0;
 			kfg_sched_on_me( &s.sched, ulBaseCommitID, nVBlank + ( s.bAnalysisOnePass ? 1 : 2 ), true, false );
+			s.ulTraceLatchID = ulBaseCommitID;
+			s.nTraceLatchVBlank = nVBlank;
+			s.nTraceMeReady = nVBlank + ( s.bAnalysisOnePass ? 1 : 2 );
 		}
 
 		s.pending = kfg_sched_decide( &s.sched, nVBlank );
+		s.uTraceCapFps = uint32_t( BaseCapFPS( RefreshHz() ) );
+		s.uTraceDecisions++;
 		s.ulPendingID = ulBaseCommitID;
 		s.nPendingVBlank = nVBlank;
 		s.bPending = true;
@@ -1471,11 +1490,19 @@ namespace kfg
 			s.pszLastProblem = "composite_bypassed";
 		}
 		if ( !g_bTraceOn.load( std::memory_order_relaxed ) )
+		{
+			s.ulTraceLatchID = 0;
+			s.uTraceDecisions = 0;
 			return;
+		}
 		std::scoped_lock lock( g_TraceMutex );
 		if ( g_InFlight.size() > 64 )
 			g_InFlight.clear();  // flips stopped arriving (suspend, DPMS)
-		g_InFlight.push_back( TraceRow_t{ s.nPendingVBlank, 0, s.pending, bBypass, s.ulGridPeriod, s.uMultiplier } );
+		g_InFlight.push_back( TraceRow_t{ s.nPendingVBlank, 0, s.pending, bBypass, s.ulGridPeriod, s.uMultiplier,
+			s.ulTraceLatchID, s.ulTraceLatchID ? s.nTraceLatchVBlank : 0, s.ulTraceLatchID ? s.nTraceMeReady : 0,
+			s.uTraceCapFps, s.uTraceDecisions } );
+		s.ulTraceLatchID = 0;
+		s.uTraceDecisions = 0;
 	}
 
 	void OnPageFlip( uint64_t ulVBlankNs, uint32_t uSequence )
