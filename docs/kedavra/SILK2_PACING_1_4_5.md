@@ -176,3 +176,24 @@ jumps 2.41→0.14/min, real shown 0.990→0.999, latency P95 57→51 ms).
 - Recovery from a hitch takes up to ~15 vblanks of 1.25-1.75x motion instead of one jump.
   `-DKFG_STALL_GAP=1 -DKFG_JUMP_DEBT=8` restores a jump-based recovery (lower latency after stalls,
   visible content skips); `-DKFG_NEED_N=0 -DKFG_UNDERCAP=0` disables the under-cap mode.
+
+## Analysis cost: measured options (lavapipe, CPU Vulkan; relative only)
+
+`kfg_vktest --size 1280x800 --bench 30` (the Deck's 1280x800), GPU timestamps on lavapipe. Absolute
+times are CPU-rendered and say nothing about the Deck (Deck: ~6.4-8 ms per pair); the split between
+passes and the relative change are what counts. Quality: generated-frame PSNR against the true
+intermediate over the 33 test phases of `kfg_vktest`.
+
+| analysis size | analysis (lavapipe) | of which motion search | mean PSNR | phases worse than full size | worst phase | engine test |
+|---|---|---|---|---|---|---|
+| full 1280x800 (current) | 174.3 ms | 101.4 ms (58 %) | 43.47 dB | - | - | PASS |
+| 768 000 px (~1131x707) | 140.7 ms (-19 %) | 81.4 ms | 42.88 dB | 19 of 33 | -3.87 dB | PASS |
+| 512 000 px | 96.0 ms (-45 %) | 56.3 ms | 39.64 dB | 25 of 33 | -14.8 dB | 10 FAIL |
+| 360 000 px | 75.3 ms (-57 %) | 41.6 ms | 39.62 dB | 26 of 33 | -14.8 dB | 10 FAIL |
+
+Pass split at full size: motion search 58 % (three levels: 26, 31, 44 ms), repair 22 %, selection 18 %,
+reductions and global fit 4 %. A lower analysis resolution is **not** admissible under "no quality
+regression": even 0.75x area loses up to 3.9 dB on some phases. Options not measured yet: a smaller
+search radius on the finest motion level, skipping the finest motion level when the global (homography)
+fit explains the frame, one repair pass instead of two, and fusing selection into repair. Each needs
+code and the same PSNR gate; none is in this branch.
