@@ -47,11 +47,15 @@ $(BUILD)/test_completion_bridge: sched/test_completion_bridge.c sched/kfg_sched.
 test-pacing:
 	$(PYTHON) -m unittest discover -s tools -p 'test_pacing.py'
 
-test-sched: $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_sim $(BUILD)/test_completion_bridge
+test-sched: $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_sim $(BUILD)/kfg_replay $(BUILD)/test_completion_bridge
 	$(BUILD)/test_completion_bridge
 	$(BUILD)/test_sched
 	$(BUILD)/test_auto
 	$(PYTHON) sched/run_scenarios.py --sim $(BUILD)/kfg_sim --seeds 3 --out $(BUILD)/scenarios.json
+	# Replay smoke test: an 89 ms game frame every 10 s (Deck run B) is paid back, not skipped.
+	$(PYTHON) sched/kfg_replay.py hitch -o $(BUILD)/hitch_events.csv --me-lag 2
+	$(PYTHON) sched/kfg_replay.py compare --bin new=$(BUILD)/kfg_replay --json $(BUILD)/hitch_replay.json $(BUILD)/hitch_events.csv
+	$(PYTHON) -c "import json,sys; r=json.load(open('$(BUILD)/hitch_replay.json'))['results']['hitch_events.csv']['new']; sys.exit(0 if r['resync_per_min']==0 and r['jump_per_min']==0 and r['real_shown']>0.99 else 1)"
 
 test-engine: $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
 	$(BUILD)/kfg_vktest --spv $(BUILD) --json $(BUILD)/engine.json

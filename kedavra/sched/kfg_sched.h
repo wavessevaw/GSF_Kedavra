@@ -29,11 +29,19 @@
 //
 // Silk catch-up (GSF 1.4): content positions have KFG_SCHED_SUB steps per vblank. Latency the
 // display owes (after a stall, or the give-back above) is not taken back in one jump of whole
-// vblanks: the content advances 1.25x (1.5x when far behind) for a few vblanks instead, so the
-// motion speeds up briefly rather than skipping. Every output still costs one warp or one copy
-// (no extra GPU work), and the steady delay is the same as before. Looking a few vblanks
-// ahead, a display about to run out of ready content (a late game frame) slows down evenly
-// instead of freezing, and the catch-up pays that back.
+// vblanks: the content advances faster for a few vblanks instead, so the motion speeds up
+// briefly rather than skipping. Every output still costs one warp or one copy (no extra GPU
+// work).
+//
+// Silk 2 (GSF 1.4.5): the content runs from real frame to real frame (kfg_sched_plan). Each
+// output covers an even share of what is left to the next real frame; a slow-down or a
+// catch-up changes how many outputs an interval gets, so every real frame lands exactly on a
+// vblank and is shown. The delay added by a late source is bounded (KFG_REANCHOR), and what a
+// game hitch costs is paid back by the catch-up (at most 1.75x) instead of a resynchronisation,
+// which only follows a long stall (a source gap over KFG_STALL_GAP x max_delay: loading,
+// suspend). A source steadily under the cap is waited for at its own rate, and the give-back
+// keeps the delay its recent intervals needed (KFG_NEED_N), so its delay and speed stay
+// constant instead of creeping up and catching up in a cycle.
 //
 // The header is self-contained C99/C++ so the same code runs in the
 // compositor, in the simulator and in the unit tests.
@@ -55,7 +63,7 @@ extern "C" {
 #define KFG_FAST_DEBT 3      // owed vblanks from which a catch-up may run at 1.75x instead of 1.5x
 #endif
 #ifndef KFG_JUMP_DEBT
-#define KFG_JUMP_DEBT 8      // owed vblanks from which the display jumps back to its steady delay
+#define KFG_JUMP_DEBT 1000   // owed vblanks from which the display jumps back to its steady delay
 #endif
 #ifndef KFG_SLOW_MIN
 #define KFG_SLOW_MIN 4       // slowest slow-down: 1/4 speed
@@ -70,7 +78,7 @@ extern "C" {
 #define KFG_UNDERCAP 1       // wait for a source under the cap at its own rate
 #endif
 #ifndef KFG_STALL_GAP
-#define KFG_STALL_GAP 1      // a source gap over this many max_delay is a long stall (resync)
+#define KFG_STALL_GAP 2      // a source gap over this many max_delay is a long stall (resync)
 #endif
 #ifndef KFG_RESYNC_HARD
 #define KFG_RESYNC_HARD 2    // resynchronise at this many max_delay behind whatever the cause
