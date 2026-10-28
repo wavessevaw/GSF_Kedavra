@@ -133,10 +133,13 @@ namespace kfg
 		// Paint in progress.
 		bool bPending = false;
 		// Motion analysis of the newest source, submitted after this paint's composite.
-		// It is split in two submissions on consecutive vblanks (k_uAnalysisSplit), so no
-		// single one holds the queue long enough to delay the next composite.
+		// It goes in one submission when it takes well under a refresh (GSF 1.4.2: ~2.5 ms on
+		// the Deck at 90 Hz), so the pair is usable on the next vblank; a slower one is split
+		// over two vblanks (k_uAnalysisSplit) so it never delays the next composite.
 		kfg_plan analysisPlan = {};
 		bool bAnalysisQueued = false;
+		bool bAnalysisOnePass = true;
+		double flAnalysisUsEma = 0;  // recent analysis time per pair, both parts
 		uint32_t uAnalysisNext = 0;  // first pass not yet submitted
 		// Multiplier picked from the game's own frame rate (kfg_multiplier 1).
 		kfg_auto autoc = {};
@@ -171,7 +174,7 @@ namespace kfg
 		// Analysis submissions (not in gpu_us): their own pool, {slot, part 2} in flight.
 		VkQueryPool analysisPool = VK_NULL_HANDLE;
 		uint32_t uNextAnalysisQuery = 0;
-		std::deque<std::pair<uint32_t, bool>> pendingAnalysis;
+		std::deque<std::pair<uint32_t, uint8_t>> pendingAnalysis;  // slot, 0 part 1, 1 part 2, 2 whole pair
 		double flAnalysisUsPair = 0, flAnalysisUsLast = 0, flAnalysisUsSum = 0;
 		uint64_t ulAnalysisPairs = 0;
 
@@ -217,7 +220,8 @@ namespace kfg
 	// rate) into a BGRA bitmap and publishes it atomically. Gamescope shows it as one
 	// more layer of every composited frame, so it counts what reaches the screen,
 	// generated frames included. File: 8 x u32 header {magic 'KFGH', version 1, width,
-	// height, corner 0-3 (TL, TR, BL, BR), margin px, sequence, 0}, then w*h*4 bytes.
+	// height, corner 0-3 (TL, TR, BL, BR) or 4 (centre: a message panel), margin px, sequence, 0},
+	// then w*h*4 bytes.
 
 	gamescope::ConVar<std::string> cv_kfg_hud{ "kfg_hud", "/dev/shm/kedavra-hud.raw", "KEDAVRA HUD bitmap written by the Decky plugin; empty = no HUD.", CopyTo( g_sHudPath ) };
 
@@ -302,7 +306,7 @@ namespace kfg
 			h.uHeight = hdr[ 3 ];
 		}
 		h.pixels = std::move( px );
-		h.uCorner = hdr[ 4 ] & 3u;
+		h.uCorner = hdr[ 4 ] == 4u ? 4u : hdr[ 4 ] & 3u;
 		h.uMargin = std::min( hdr[ 5 ], 200u );
 		h.bUpload = true;
 		h.bVisible = true;
@@ -320,8 +324,11 @@ namespace kfg
 		h.uOutputHeight = uint32_t( std::lround( flOutH ) );  // the HUD's size follows the screen
 		if ( !h.bVisible || !h.pTex || pFrameInfo->layers.count() >= k_nMaxLayers )
 			return;
-		const float flX = ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
-		const float flY = ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
+		const bool bCentre = h.uCorner == 4u;
+		const float flX = bCentre ? std::floor( ( flOutW - float( h.uWidth ) ) / 2.0f )
+		                : ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
+		const float flY = bCentre ? std::floor( ( flOutH - float( h.uHeight ) ) / 2.0f )
+		                : ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
 
 		FrameInfo_t::Layer_t *layer = pFrameInfo->layers.push();
 		if ( !layer )
@@ -568,7 +575,7 @@ namespace kfg
 	{
 		while ( !s.pendingAnalysis.empty() )
 		{
-			const auto [ uSlot, bPart2 ] = s.pendingAnalysis.front();
+			const auto [ uSlot, uPart ] = s.pendingAnalysis.front();
 			uint64_t ulResults[ 4 ] = {};
 			VkResult res = g_device.vk.GetQueryPoolResults( g_device.device(), s.analysisPool, uSlot * 2, 2,
 				sizeof( ulResults ), ulResults, 2 * sizeof( uint64_t ), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT );
@@ -576,13 +583,15 @@ namespace kfg
 				return;
 			s.pendingAnalysis.pop_front();
 			const double flUs = double( ( ulResults[ 2 ] - ulResults[ 0 ] ) & s.ulValidMask ) * s.flPeriodNs / 1000.0;
-			if ( !bPart2 )
+			if ( uPart == 0 )
 			{
 				s.flAnalysisUsPair = flUs;  // a part 1 without its part 2 (history reset) is dropped here
 				continue;
 			}
-			s.flAnalysisUsLast = s.flAnalysisUsPair + flUs;
+			s.flAnalysisUsLast = ( uPart == 2 ? 0.0 : s.flAnalysisUsPair ) + flUs;
 			s.flAnalysisUsSum += s.flAnalysisUsLast;
+			s.flAnalysisUsEma = s.flAnalysisUsEma > 0 ? s.flAnalysisUsEma + ( s.flAnalysisUsLast - s.flAnalysisUsEma ) / 16.0
+			                                          : s.flAnalysisUsLast;
 			s.ulAnalysisPairs++;
 		}
 	}
@@ -981,7 +990,7 @@ namespace kfg
 			"\"last_problem\":\"%s\",\"trace\":\"%s\","
 			"\"policy\":%d,\"req_multiplier\":%d,\"req_base_fps\":%d,\"req_auto_floor\":%d,\"auto_floor\":%u,"
 			"\"post\":\"%s\",\"post_active\":%s,\"post_error\":\"%s\",\"post_frames\":%" PRIu64 ",\"post_skipped\":%" PRIu64 ","
-			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
+			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ",\"analysis_one_pass\":%s,"
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
@@ -999,7 +1008,7 @@ namespace kfg
 			JsonSafe( s.sPostSpec ).c_str(), kfg_post_active( &s.post ) ? "true" : "false", JsonSafe( s.sPostError ).c_str(),
 			s.ulPostFrames, s.ulPostSkipped,
 			s.flPostUsLast, s.ulPostSamples ? s.flPostUsSum / double( s.ulPostSamples ) : 0.0,
-			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs,
+			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs, s.bAnalysisOnePass ? "true" : "false",
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
 			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight );
 		fclose( f );
@@ -1142,6 +1151,8 @@ namespace kfg
 			s.uMultiplier = uMult;
 			kfg_log.infof( "multiplier %u", uMult );
 		}
+		// The base cap's release pattern (40 at 90 Hz: 2, 2, 2, 3 vblanks); unchanged caps are a no-op.
+		kfg_sched_set_cadence( &s.sched, uint32_t( RefreshHz() ), uint32_t( BaseCapFPS( RefreshHz() ) ) );
 		if ( uMult == 1 && s.sched.state == KFG_STATE_OFF )
 		{
 			// Fully off: drop the ring so an idle feature costs no memory.
@@ -1233,8 +1244,11 @@ namespace kfg
 			if ( s.bAutoInit )
 				kfg_auto_on_latch( &s.autoc, nVBlank );
 			// Analysis runs in its own submission after this paint's composite (see
-			// SubmitAnalysis), in two parts, so the pair is usable two vblanks later.
-			kfg_sched_on_me( &s.sched, ulBaseCommitID, nVBlank + 2, true, false );
+			// SubmitAnalysis): in one pass while it takes under a third of the refresh, so the
+			// pair is usable on the next vblank, else in two parts, usable two vblanks later.
+			const double flPeriodUs = 1e6 / double( std::max( 1, RefreshHz() ) );
+			s.bAnalysisOnePass = s.flAnalysisUsEma < flPeriodUs / 3.0 && s.flAnalysisUsLast < flPeriodUs / 2.0;
+			kfg_sched_on_me( &s.sched, ulBaseCommitID, nVBlank + ( s.bAnalysisOnePass ? 1 : 2 ), true, false );
 		}
 
 		s.pending = kfg_sched_decide( &s.sched, nVBlank );
@@ -1410,9 +1424,10 @@ namespace kfg
 			s.bAnalysisQueued = false;
 			return;
 		}
-		// Part 1: luma pyramid and the two coarse motion levels (~1.6 ms on the Deck);
-		// part 2, one vblank later: the finest motion level and the cut statistics.
-		const uint32_t uEnd = s.uAnalysisNext == 0 ? std::min( s.analysisPlan.n, k_uAnalysisSplit ) : s.analysisPlan.n;
+		// One pass, or split: part 1 the luma pyramid and the two coarse motion levels (~1.6 ms
+		// on the Deck), part 2 one vblank later the finest motion level and the cut statistics.
+		const uint32_t uStart = s.uAnalysisNext;
+		const uint32_t uEnd = s.uAnalysisNext == 0 && !s.bAnalysisOnePass ? std::min( s.analysisPlan.n, k_uAnalysisSplit ) : s.analysisPlan.n;
 		auto pCmd = g_device.commandBuffer();
 		std::optional<uint32_t> oQuery;
 		if ( s.analysisPool != VK_NULL_HANDLE )
@@ -1432,7 +1447,7 @@ namespace kfg
 		if ( oQuery )
 		{
 			g_device.vk.CmdWriteTimestamp( pCmd->rawBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.analysisPool, *oQuery * 2 + 1 );
-			s.pendingAnalysis.push_back( { *oQuery, uEnd >= s.analysisPlan.n } );
+			s.pendingAnalysis.push_back( { *oQuery, uint8_t( uEnd < s.analysisPlan.n ? 0 : uStart == 0 ? 2 : 1 ) } );
 		}
 		g_device.submit( std::move( pCmd ) );
 		s.uAnalysisNext = uEnd;

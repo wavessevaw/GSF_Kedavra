@@ -109,6 +109,46 @@ static void test_fractional_cap(void)
 	}
 }
 
+// GSF 1.4.2: with the cap's cadence known, a fractional cap whose frames now and then latch a
+// vblank late must not keep changing the display's speed (Deck 1.4.1: x2.25 juddered).
+static void test_fractional_cadence(void)
+{
+	static const struct { int64_t cap, hz; uint32_t mult; } caps[] = {
+		{ 40, 90, 3 }, { 35, 90, 3 }, { 24, 90, 4 }, { 25, 60, 3 }, { 45, 90, 2 } };
+	for (size_t c = 0; c < sizeof caps / sizeof caps[0]; c++) {
+		const int64_t cap = caps[c].cap, hz = caps[c].hz;
+		kfg_sched_config cfg = kfg_sched_default_config(caps[c].mult);
+		kfg_sched s;
+		kfg_sched_init(&s, &cfg);
+		kfg_sched_set_cadence(&s, (uint32_t)hz, (uint32_t)cap);
+		uint64_t id = 0;
+		int changed = 0, total = 0;
+		int64_t shown = INT64_MIN, late = -1;
+		for (int64_t k = 0; k < 60 * hz; k++) {
+			const bool release = k == 0 || (k * cap) / hz != ((k - 1) * cap) / hz;
+			if (release && (id + 1) % 47 == 0 && late < 0) {
+				late = k + 1;  // this frame comes one vblank after its release
+			} else if (release || k == late) {
+				kfg_sched_on_latch(&s, ++id, k);
+				kfg_sched_on_me(&s, id, k + 2, true, false);
+				if (k == late)
+					late = -1;
+			}
+			kfg_decision d = kfg_sched_decide(&s, k);
+			const int64_t here = (d.show == KFG_SHOW_REAL || d.show == KFG_SHOW_GEN) ? d.pos : shown;
+			if (k > 2 * hz && shown != INT64_MIN) {
+				total++;
+				const int64_t st = here - shown;
+				if (st < KFG_SCHED_SUB * 8 / 10 || st > KFG_SCHED_SUB * 12 / 10)
+					changed++;
+			}
+			shown = here;
+		}
+		CHECK(changed * 100 <= total * 2, "%d fps at %d Hz: speed changed on %d of %d outputs", (int)cap, (int)hz,
+		      changed, total);
+	}
+}
+
 // A late source must never be displayed out of order, and latency returns after the stall.
 static void test_late_source_recovery(void)
 {
@@ -126,16 +166,17 @@ static void test_late_source_recovery(void)
 		kfg_decision d = kfg_sched_decide(&s, k);
 		if (k == 141)
 			delay_before = d.delay;
-		if (k == 300)
+		if (k == 550)  // the calm stretch after the stall gives the extra vblank back
 			delay_after = d.delay;
 	}
-	CHECK(delay_before == delay_after, "delay before %" PRId64 " after %" PRId64, delay_before, delay_after);
+	CHECK(delay_after <= delay_before, "delay before %" PRId64 " after %" PRId64, delay_before, delay_after);
 	CHECK(s.n_repeat_reason[KFG_REPEAT_SOURCE_LATE] <= 4, "source-late repeats %" PRIu64, s.n_repeat_reason[KFG_REPEAT_SOURCE_LATE]);
 }
 
 // Silk pacing (GSF 1.4): a late source and the latency give-back never move the picture by a
-// whole extra vblank at once; the display catches up with brief speed-ups instead, and the
-// steady delay is the same as before the stall.
+// whole extra vblank at once. Since 1.4.2 a slow-down is not paid back with a speed-up: the
+// display keeps at most one vblank more delay while late frames keep coming, instead of
+// changing speed at each of them.
 static void test_silk_catchup(void)
 {
 	for (uint32_t mult = 2; mult <= 3; mult++) {
@@ -168,7 +209,7 @@ static void test_silk_catchup(void)
 		}
 		CHECK(jumps == 0, "x%u: %d jumps", mult, jumps);
 		CHECK(freezes <= 2, "x%u: %d freezes", mult, freezes);
-		CHECK(delay_after <= delay_before, "x%u: delay %" PRId64 " -> %" PRId64, mult, delay_before, delay_after);
+		CHECK(delay_after <= delay_before + 1, "x%u: delay %" PRId64 " -> %" PRId64, mult, delay_before, delay_after);
 		CHECK(s.n_catchup > 0, "x%u: no catch-up", mult);
 	}
 }
@@ -328,6 +369,7 @@ int main(void)
 	test_locked_x3();
 	test_locked_x2();
 	test_fractional_cap();
+	test_fractional_cadence();
 	test_late_source_recovery();
 	test_silk_catchup();
 	test_degrade();

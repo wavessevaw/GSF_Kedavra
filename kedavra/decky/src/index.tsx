@@ -3,7 +3,7 @@ import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 
 type Summary = {pass?: boolean; p95_ms?: number; p99_ms?: number; missed_pct?: number; rows?: number; checks?: Record<string, boolean>};
 type Report = {trace: string; report: string; ok: boolean; log: string; summary?: Summary};
