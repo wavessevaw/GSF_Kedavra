@@ -147,7 +147,9 @@ void main()
 		for (int m = 0; m < i; m++)
 			same = (same < 0 && cand[m] == cand[i]) ? m : same;
 		raw[i] = same >= 0 ? raw[same] : cost(c1, cand[i]);
-		match[i] = same >= 0 ? match[same] : raw[i] + consistency(cpix, cand[i], fsize);
+		// The camera's own motion is not held to the field: at the sides of a fast turn the
+		// field is what is wrong, and the camera map is fitted to the whole picture.
+		match[i] = same >= 0 ? match[same] : raw[i] + (i == 9 ? min(consistency(cpix, cand[i], fsize), 0.003) : consistency(cpix, cand[i], fsize));
 		// The camera motion pays a flat fee instead of its distance from the block's vector,
 		// so static content (HUD) keeps winning ties against it.
 		float c = match[i] + (i == 9 ? 0.002 : 0.0005 * length(cand[i] - f.xy));

@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -151,9 +151,74 @@ static void camera_pos(double t, double *cx, double *cy)
 	*cy = y * g_timescale;
 }
 
+// Turning camera in perspective (90 degree horizontal field of view at 1280 x 800): the yaw
+// speeds up to 10 degrees per source frame and slows down again, with a pitch drift and a
+// slight roll, under a static HUD. The world is a textured sphere around the camera, so the
+// motion is a pure rotation: twice as fast at the sides as in the centre, curved off the
+// horizon, as a game's camera turn is (a translation-only model misses the sides).
+static const double TURN_W[] = { 0.8, 2.0, 3.5, 5.5, 7.5, 10.0, 8.0, 5.5, 3.0, 1.2 };
+#define TURN_FRAMES ((int)(sizeof(TURN_W) / sizeof(TURN_W[0])))
+
+static void turn_angles(double t, double *yaw, double *pitch, double *roll)
+{
+	double a = 0, b = 0;
+	int f = (int)floor(t);
+	for (int i = 0; i < f && i < TURN_FRAMES; i++) {
+		a += TURN_W[i];
+		b += 0.25 * TURN_W[i] * sin(i * 0.9);
+	}
+	if (f >= 0 && f < TURN_FRAMES) {
+		a += TURN_W[f] * (t - f);
+		b += 0.25 * TURN_W[f] * sin(f * 0.9) * (t - f);
+	}
+	const double k = g_timescale * 3.14159265358979 / 180.0;
+	*yaw = a * k;
+	*pitch = b * k;
+	*roll = 0.04 * b * k;
+}
+
+static void sphere_pixel(double t, double x, double y, double rgb[3])
+{
+	const double f = 640.0;
+	double yaw, pitch, roll;
+	turn_angles(t, &yaw, &pitch, &roll);
+	double dx = x - 640.0, dy = y - 400.0, dz = f;
+	// roll (about z), pitch (about x), then yaw (about y)
+	double cr = cos(roll), sr = sin(roll);
+	double x1 = cr * dx - sr * dy, y1 = sr * dx + cr * dy, z1 = dz;
+	double cp = cos(pitch), sp = sin(pitch);
+	double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
+	double cy = cos(yaw), sy = sin(yaw);
+	double x3 = cy * x1 + sy * z2, z3 = -sy * x1 + cy * z2;
+	double lon = atan2(x3, z3), lat = atan2(y2, hypot(x3, z3));
+	background(lon * f + 4000.0, lat * f, 17, rgb);
+}
+
+// Where the content at pixel (x, y) of the turn at time t0 is at time t1.
+static void turn_project(double t0, double t1, double x, double y, double *x1, double *y1)
+{
+	double yaw, pitch, roll;
+	turn_angles(t0, &yaw, &pitch, &roll);
+	double dx = x - 640.0, dy = y - 400.0, dz = 640.0;
+	double a = cos(roll) * dx - sin(roll) * dy, b = sin(roll) * dx + cos(roll) * dy, c = dz;
+	double b2 = cos(pitch) * b - sin(pitch) * c, c2 = sin(pitch) * b + cos(pitch) * c;
+	double a3 = cos(yaw) * a + sin(yaw) * c2, c3 = -sin(yaw) * a + cos(yaw) * c2;
+	turn_angles(t1, &yaw, &pitch, &roll);
+	double a4 = cos(yaw) * a3 - sin(yaw) * c3, c4 = sin(yaw) * a3 + cos(yaw) * c3;
+	double b5 = cos(pitch) * b2 + sin(pitch) * c4, c5 = -sin(pitch) * b2 + cos(pitch) * c4;
+	double a6 = cos(roll) * a4 + sin(roll) * b5, b6 = -sin(roll) * a4 + cos(roll) * b5;
+	*x1 = 640.0 + 640.0 * a6 / c5;
+	*y1 = 400.0 + 640.0 * b6 / c5;
+}
+
 static void scene_pixel(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
 {
 	switch (s->kind) {
+	case S_TURN:
+		if (hud(x, y, w, h, rgb))
+			return;
+		sphere_pixel(t, x, y, rgb);
+		return;
 	case S_CAMERA: {
 		if (hud(x, y, w, h, rgb))
 			return;
@@ -253,7 +318,7 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 static void render(const scene *s, double t, int w, int h, uint8_t *out)
 {
 	// The camera sequence keeps its frame count and moves faster instead (camera_pos).
-	if (s->kind != S_CAMERA)
+	if (s->kind != S_CAMERA && s->kind != S_TURN)
 		t *= g_timescale;
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++) {
@@ -426,7 +491,7 @@ static int engine_init(engine *e, kfg_vk *vk, uint32_t w, uint32_t h, VkFormat c
 			if (l >= 2 && kfg_vk_image_create(vk, &e->flow[r][l], kfg_vk_format(KFG_FORMAT_RGBA16F), sz[0], sz[1]))
 				return -1;
 		}
-		if (kfg_vk_image_create(vk, &e->stats[r], kfg_vk_format(KFG_FORMAT_RGBA16F), 4, 1))
+		if (kfg_vk_image_create(vk, &e->stats[r], kfg_vk_format(KFG_FORMAT_RGBA16F), 7, 1))
 			return -1;
 	}
 	uint32_t bs[2];
@@ -585,7 +650,7 @@ static int hdr_checks(kfg_vk *vk, int w, int h, int transfer, FILE *js)
 		run_plan(&e, &p, NULL, NULL);
 		kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, -1, &tune);
 		run_plan(&e, &p, NULL, NULL);
-		float st[16];
+		float st[28];
 		kfg_vk_download_rgba16f(vk, &e.stats[1], st);
 		bool ok = true;
 		const char *why = "";
@@ -672,7 +737,7 @@ static int border_checks(kfg_vk *vk)
 	}
 	kfg_vk_upload_rgba8(vk, &e.color[0], a);
 	kfg_vk_upload_rgba8(vk, &e.color[1], b);
-	uint16_t stats[16] = {0};
+	uint16_t stats[28] = {0};
 	kfg_vk_upload_raw(vk, &e.stats[1], stats, sizeof(stats));
 	_Float16 field[16 * 12 * 4];
 	int failures = 0;
@@ -774,7 +839,7 @@ int main(int argc, char **argv)
 		run_plan(&e, &p, NULL, NULL);
 		kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, -1, &tune); // pair A(0)->B(1), pair ring 1
 		run_plan(&e, &p, NULL, NULL);
-		float st[16];  // stats is 4x1
+		float st[28];  // stats is 7x1
 		kfg_vk_download_rgba16f(&vk, &e.stats[1], st);
 		if (getenv("KFG_FLOWDUMP")) {
 			// Tuning aid: the most common forward vectors per level (pixels, rounded).
@@ -846,7 +911,9 @@ int main(int argc, char **argv)
 		if (js)
 			fprintf(js, "  {\"scene\": \"%s\", \"dynamic\": %s, \"cut_flag\": %.0f, \"bad_fraction\": %.4f, \"phases\": [\n",
 				s->name, s->dynamic ? "true" : "false", st[0], st[1]);
-		printf("%-12s cut=%.0f bad=%.3f mc=%.4f zero=%.4f global=(%.1f,%.1f) grad=(%.1f,%.1f;%.1f,%.1f)\n", s->name, st[0], st[1], st[2], st[3], st[4], st[5], st[8], st[9], st[10], st[11]);
+		// The camera map's translation (pixels) and perspective terms (texels 1-2: h0-1 h1 h2 h3, h4-1 h5 h6 h7).
+		printf("%-12s cut=%.0f bad=%.3f mc=%.4f zero=%.4f global=(%.1f,%.1f) zoom=(%.3f,%.3f) persp=(%.4f,%.4f)\n", s->name, st[0], st[1], st[2], st[3],
+		       st[6] * 0.5 * w, st[9] * 0.5 * w, st[4], st[8], st[10], st[11]);
 		if (s->cut && st[0] < 0.5) {
 			printf("  FAIL: scene cut not detected\n");
 			failures++;
@@ -968,14 +1035,18 @@ int main(int argc, char **argv)
 
 	// Active camera: the accelerating pan under a HUD, x3 outputs per pair, every output
 	// compared with the truth and with the one before it. Informative: printed and in the JSON.
-	if (!only || !strcmp(only, "camera")) {
-		const scene cam = { "camera", S_CAMERA, 0, 0, true, false };
-		const scene *s = &cam;
+	static const scene seqs[] = { { "camera", S_CAMERA, 0, 0, true, false }, { "turn", S_TURN, 0, 0, true, false } };
+	for (int sq = 0; sq < 2; sq++) {
+		const scene *s = &seqs[sq];
+		if (only && strcmp(only, s->name))
+			continue;
+		const int nframes = s->kind == S_TURN ? TURN_FRAMES : CAM_FRAMES;
+		double ps_side = 0;
 		uint8_t *O = malloc(nbytes), *Op = malloc(nbytes), *Tp = malloc(nbytes), *Dp = malloc(nbytes);
 		double te_gen = 0, te_dup = 0, ps_gen = 0, ps_dup = 0, worst = 1e9, hud_max = 0;
 		int n_te = 0, n_ps = 0, cuts = 0;
 		bool have_prev = false;
-		for (int f = 0; f <= CAM_FRAMES; f++) {
+		for (int f = 0; f <= nframes; f++) {
 			uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
 			render(s, (double)f, w, h, B);
 			kfg_vk_upload_rgba8(&vk, &e.color[fb], B);
@@ -984,13 +1055,38 @@ int main(int argc, char **argv)
 			run_plan(&e, &p, NULL, NULL);
 			if (f == 0)
 				continue;
-			float st[16];  // stats is 4x1
+			float st[28];  // stats is 7x1
 			kfg_vk_download_rgba16f(&vk, &e.stats[fb], st);
 			if (st[0] > 0.5)
 				cuts++;
 			if (getenv("KFG_VERBOSE"))
-				printf("  camera f%02d stats cut=%.0f bad=%.3f mc/zero=%.3f global=(%.1f,%.1f)\n", f, st[0], st[1], st[2] / (st[3] + 1e-9), st[4], st[5]);
-			if (getenv("KFG_VERBOSE")) {
+				printf("  camera f%02d stats cut=%.0f bad=%.3f mc/zero=%.3f global=(%.1f,%.1f)\n", f, st[0], st[1], st[2] / (st[3] + 1e-9), st[6] * 0.5 * w, st[9] * 0.5 * w);
+			if (getenv("KFG_VERBOSE") && s->kind == S_TURN) {
+				printf("  turn f%02d map fwd", f);
+				for (int k = 4; k < 12; k++)
+					printf(" %.4f", st[k]);
+				printf("\n");
+				for (int l = KFG_LEVELS; l >= 2; l--) {
+					const kfg_vk_image *fi = &e.flow[fb][l];
+					float *fl = malloc((size_t)fi->width * fi->height * 4 * sizeof(float));
+					kfg_vk_download_rgba16f(&vk, fi, fl);
+					int ok2 = 0, ok8 = 0, n = (int)(fi->width * fi->height), side2 = 0, sn = 0;
+					const double bs = (double)(1 << l);
+					for (int i = 0; i < n; i++) {
+						double px = (i % fi->width + 0.5) * bs, py = (i / fi->width + 0.5) * bs, qx, qy;
+						if (hud(px, py, w, h, (double[3]){0, 0, 0}))
+							continue;
+						turn_project(f - 1, f, px, py, &qx, &qy);
+						double d = hypot(fl[i * 4] - (qx - px), fl[i * 4 + 1] - (qy - py));
+						ok2 += d < 2.0;
+						ok8 += d < 8.0;
+						if (px < 220 || px > w - 220) { side2 += d < 2.0; sn++; }
+					}
+					printf("  turn f%02d level %d: %.0f%% within 2 px, %.0f%% within 8 px, sides %.0f%% within 2 px\n", f, l, 100.0 * ok2 / n, 100.0 * ok8 / n, 100.0 * side2 / (sn ? sn : 1));
+					free(fl);
+				}
+			}
+			if (getenv("KFG_VERBOSE") && s->kind == S_CAMERA) {
 				// Share of blocks whose forward vector is within 2 / 8 pixels of the camera motion.
 				double tx = -CAM_VX[f - 1], ty = -0.18 * CAM_VX[f - 1] * sin((f - 1) * 1.3);
 				for (int l = KFG_LEVELS; l >= 2; l--) {
@@ -1038,18 +1134,24 @@ int main(int argc, char **argv)
 					kfg_vk_download_rgba8(&vk, &e.output, O);
 					double pg = psnr_region(O, T, w, h, 0, 0, w, h);
 					ps_gen += pg;
+					// The sides of the picture, where a turn moves fastest and bends most.
+					ps_side += 0.5 * (psnr_region(O, T, w, h, 0, 80, 220, h - 60) + psnr_region(O, T, w, h, w - 220, 80, w, h - 60));
 					ps_dup += psnr_region(D, T, w, h, 0, 0, w, h);
 					if (pg < worst)
 						worst = pg;
 					if (getenv("KFG_VERBOSE"))
-						printf("  camera f%02d v=%.1f t=%d/3 gen %.2f dB\n", f, CAM_VX[f - 1], j, pg);
+						printf("  %s f%02d t=%d/3 gen %.2f dB\n", s->name, f, j, pg);
 					double he = mean_abs(O, T, w, h, 40, 30, 360, 70);
 					if (he > hud_max)
 						hud_max = he;
 					n_ps++;
 					char name[64];
-					snprintf(name, sizeof(name), "camera_f%02d_t%d_gen", f, j);
+					snprintf(name, sizeof(name), "%s_f%02d_t%d_gen", s->name, f, j);
 					write_ppm(out_dir, name, O, w, h);
+					if (getenv("KFG_VERBOSE")) {
+						snprintf(name, sizeof(name), "%s_f%02d_t%d_truth", s->name, f, j);
+						write_ppm(out_dir, name, T, w, h);
+					}
 				}
 				if (have_prev) {
 					te_gen += temporal_err(O, Op, T, Tp, w, h);
@@ -1062,11 +1164,11 @@ int main(int argc, char **argv)
 				have_prev = true;
 			}
 		}
-		printf("camera: psnr gen %.2f dB (worst %.2f), dup %.2f dB; temporal gen %.3f, dup %.3f; cuts %d of %d; hud max %.2f\n",
-		       ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, CAM_FRAMES, hud_max);
+		printf("%s: psnr gen %.2f dB (worst %.2f, sides %.2f), dup %.2f dB; temporal gen %.3f, dup %.3f; cuts %d of %d; hud max %.2f\n",
+		       s->name, ps_gen / n_ps, worst, ps_side / n_ps, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, nframes, hud_max);
 		if (js)
-			fprintf(js, " \"camera\": {\"psnr_gen\": %.3f, \"psnr_worst\": %.3f, \"psnr_dup\": %.3f, \"temporal_gen\": %.4f, \"temporal_dup\": %.4f, \"cuts\": %d, \"hud_max\": %.3f},\n",
-				ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, hud_max);
+			fprintf(js, " \"%s\": {\"psnr_gen\": %.3f, \"psnr_worst\": %.3f, \"psnr_sides\": %.3f, \"psnr_dup\": %.3f, \"temporal_gen\": %.4f, \"temporal_dup\": %.4f, \"cuts\": %d, \"hud_max\": %.3f},\n",
+				s->name, ps_gen / n_ps, worst, ps_side / n_ps, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, hud_max);
 		free(O); free(Op); free(Tp); free(Dp);
 	}
 
@@ -1096,6 +1198,14 @@ int main(int argc, char **argv)
 			run_plan(&e, &p, NULL, NULL);
 			if (f == 0)
 				continue;
+			if (getenv("KFG_VERBOSE")) {
+				float st[28];
+				kfg_vk_download_rgba16f(&vk, &e.stats[fb], st);
+				printf("  %s f%02d map fwd", s->name, f);
+				for (int k = 4; k < 12; k++)
+					printf(" %.4f", st[k]);
+				printf("\n");
+			}
 			for (int j = 0; j < PHASES_PER_PAIR; j++) {
 				double t = j * PHASE_STEP;
 				render(s, f - 1 + t, w, h, T);

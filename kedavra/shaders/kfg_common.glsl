@@ -39,11 +39,17 @@ layout(binding = 0, scalar) uniform kfg_params_t {
 #define KFG_FLAG_PAIR 512
 #define KFG_FLAG_RESAMPLE 1024
 
-// Pair statistics image (4x1): texel 0 = cut and match statistics; texels 1 to 3 = camera
-// motion as affine fields over normalised image coordinates: texel 1 = motion at the image
-// centre (xy forward, zw backward, pixels), texels 2 and 3 = forward and backward gradients
-// (x: xy, y: zw, pixels per half image).
+// Pair statistics image (7x1): texel 0 = cut and match statistics; texels 1 to 4 = camera
+// motion as two plane projective maps (homographies) over image coordinates centred on the
+// image and divided by half its width: texels 1-2 forward A->B, 3-4 backward B->A, each
+// (h0 - 1, h1, h2, h3), (h4 - 1, h5, h6, h7) of x' = (h0 x + h1 y + h2) / (h6 x + h7 y + 1),
+// y' = (h3 x + h4 y + h5) / (h6 x + h7 y + 1). A turning camera moves the picture exactly
+// so (the sides twice as fast as the centre at 90 degrees, along curves); a translation and
+// a zoom are special cases. Stored relative to the identity so half floats keep the precision.
+// Texels 5-6: the log of the forward map scaled to determinant 1 (l00, l01, l02, l10),
+// (l11, l12, l20, l21), for the warp's map at phase t; zero when there is none.
 #define KFG_GLOBAL_TEXEL ivec2(1, 0)
+#define KFG_STATS_WIDTH 7
 
 float kfg_luma(vec3 c)
 {
@@ -82,12 +88,21 @@ vec4 kfg_tap(int slot, vec2 texel_pos, ivec2 size)
 }
 
 // Camera motion at a full-resolution pixel position: xy forward, zw backward, pixels.
+vec2 kfg_homography_motion(vec4 a, vec4 b, vec2 u, float hx)
+{
+	float den = b.z * u.x + b.w * u.y + 1.0;
+	vec2 m = vec2((a.x + 1.0) * u.x + a.y * u.y + a.z, a.w * u.x + (b.x + 1.0) * u.y + b.y);
+	m = abs(den) > 0.05 ? m / den : u;   // a degenerate map (never fitted so) means no motion
+	return (m - u) * hx;
+}
+
 vec4 kfg_global_at(int slot, vec2 pix)
 {
 	vec2 h = 0.5 * vec2(u_fullSize);
-	vec2 u = (pix - h) / h;
-	vec4 c = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL, 0);
-	vec4 mf = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL + ivec2(1, 0), 0);
-	vec4 mb = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL + ivec2(2, 0), 0);
-	return c + vec4(dot(mf.xy, u), dot(mf.zw, u), dot(mb.xy, u), dot(mb.zw, u));
+	vec2 u = (pix - h) / h.x;
+	vec4 fa = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL, 0);
+	vec4 fb = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL + ivec2(1, 0), 0);
+	vec4 ba = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL + ivec2(2, 0), 0);
+	vec4 bb = texelFetch(s_samplers[slot], KFG_GLOBAL_TEXEL + ivec2(3, 0), 0);
+	return vec4(kfg_homography_motion(fa, fb, u, h.x), kfg_homography_motion(ba, bb, u, h.x));
 }

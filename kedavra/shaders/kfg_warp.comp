@@ -45,8 +45,81 @@ float edge_distance(vec2 p, ivec2 size)
 	return min(d.x, d.y);
 }
 
+// Colour difference (sum of three channels) the camera map may lose by against the block's
+// vector and still win: on repeating texture a wrong vector matches about as well.
+const float CAMERA_MARGIN = 0.12;
+// A turn's map (fitted to the whole picture, with perspective) is trusted further.
+const float CAMERA_MARGIN_TURN = 0.3;
+
+// The camera map at phase t is the power F^t of the forward map F, not the blend
+// (1 - t) I + t F: a turn is a rotation, F = K R K^-1, and only the power is the rotation by
+// t of the angle (the blend put the sides of a 10 degree turn 10 px off at mid-phase, a wobble
+// of every generated frame). F^t = exp(t log F), log F from the pair's statistics (texels 5-6),
+// exp by a series and three squarings; (F^t)^-1 = exp(-t log F). Once per workgroup.
+shared mat3 s_hinv;   // (F^t)^-1
+shared mat3 s_fwd;    // F
+shared bool s_map;
+
+mat3 mexp(mat3 m)
+{
+	m *= 0.125;
+	mat3 m2 = m * m;
+	mat3 e = mat3(1.0) + m + 0.5 * m2 + (1.0 / 6.0) * m2 * m + (1.0 / 24.0) * m2 * m2;
+	e = e * e;
+	e = e * e;
+	return e * e;
+}
+
+bool camera_map()
+{
+	vec4 la = texelFetch(s_samplers[3], KFG_GLOBAL_TEXEL + ivec2(4, 0), 0);
+	vec4 lb = texelFetch(s_samplers[3], KFG_GLOBAL_TEXEL + ivec2(5, 0), 0);
+	if (la == vec4(0.0) && lb == vec4(0.0))
+		return false;
+	// Columns of log F; l22 = -(l00 + l11) (trace 0).
+	mat3 l = mat3(la.x, la.w, lb.z,
+		      la.y, lb.x, lb.w,
+		      la.z, lb.y, -(la.x + lb.x));
+	s_fwd = mexp(l);
+	s_hinv = mexp(-u_t * l);
+	return true;
+}
+
+// Colour difference of A at pa and B at pb over a sparse 5-tap cross (2 px arms), per tap: one
+// pixel alone is a lottery on smooth or fine texture, where a wrong vector often wins by
+// chance and leaves a block of the wrong motion (the cubes of a turn).
+float pair_error(vec2 pa, vec2 pb, ivec2 size)
+{
+	const vec2 o[5] = vec2[5](vec2(0.0), vec2(2.0, 0.0), vec2(-2.0, 0.0), vec2(0.0, 2.0), vec2(0.0, -2.0));
+	float e = 0.0;
+	for (int i = 0; i < 5; i++)
+		e += dot(abs(kfg_tap(0, pa + o[i], size).rgb - kfg_tap(1, pb + o[i], size).rgb), vec3(1.0));
+	return 0.2 * e;
+}
+
+// Where the content at output pixel p (phase u_t) is in A and in B under the camera map:
+// p = F^t(a) and b = F(a). Positions in source pixels. False without a usable map.
+bool camera_path(ivec2 p, vec2 sc, out vec2 pa, out vec2 pb)
+{
+	if (!s_map)
+		return false;
+	vec2 c = 0.5 * vec2(u_srcSize);   // analysis pixels
+	float hx = c.x;
+	vec2 u = ((vec2(p) + 0.5) / sc - c) / hx;
+	vec3 a = s_hinv * vec3(u, 1.0);
+	vec3 b = s_fwd * a;
+	if (abs(a.z) < 0.05 || abs(b.z) < 0.05)
+		return false;
+	pa = ((a.xy / a.z) * hx + c) * sc - 0.5;
+	pb = ((b.xy / b.z) * hx + c) * sc - 0.5;
+	return true;
+}
+
 void main()
 {
+	if (gl_LocalInvocationIndex == 0u)
+		s_map = (u_flags & KFG_FLAG_PAIR) != 0 && camera_map();
+	barrier();
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(p, u_dstSize)))
 		return;
@@ -121,6 +194,32 @@ void main()
 	vec2 v = sel.xy * sc;
 	vec2 pa = vec2(p) - u_t * v;
 	vec2 pb = vec2(p) + (1.0 - u_t) * v;
+	// The camera's motion at this very pixel (GSF 1.4.3): where the picture explains it about
+	// as well as the block's vector, the pixel follows the camera map, from A through the map
+	// at phase t to B. The world then moves as one rigid image in a turn (the sides twice as
+	// fast as the centre, along curves) instead of 4x4 blocks that each carry their own rounded
+	// vector and their own error: the jelly of a camera turn.
+	if (pair && sel.xy != vec2(0.0)) {
+		vec2 ga, gb;
+		// A camera at rest (an identity map) has nothing to offer over the field. A map without
+		// perspective (a pan, the stairs) is taken only near the block's own vector: along
+		// stripes the picture cannot tell a sliding map from the right one, and the field,
+		// held to its neighbours, already knows. A turn's map is taken outright.
+		vec4 fb = texelFetch(s_samplers[3], KFG_GLOBAL_TEXEL + ivec2(1, 0), 0);
+		bool turn = fb.z != 0.0 || fb.w != 0.0;
+		if (camera_path(p, sc, ga, gb) && length(gb - ga) > 0.5 && (turn || length(gb - ga - v) < 2.0)) {
+			float eg = pair_error(ga, gb, size);
+			float es = pair_error(pa, pb, size);
+			// Static content in the same place in both frames (a HUD) never follows the camera.
+			float ez = dot(abs(texelFetch(s_samplers[0], p, 0).rgb - texelFetch(s_samplers[1], p, 0).rgb), vec3(1.0));
+			if (eg <= es + (turn ? CAMERA_MARGIN_TURN : CAMERA_MARGIN) && eg < ez + 0.02) {
+				pa = ga;
+				pb = gb;
+				v = gb - ga;
+				sel.w = min(sel.w, 0.05);
+			}
+		}
+	}
 	// Out-of-frame samples: take the other side when only one is inside the image.
 	float da = edge_distance(pa, size), db = edge_distance(pb, size);
 	float w_b = sel.z;
