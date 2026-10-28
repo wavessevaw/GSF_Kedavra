@@ -187,7 +187,7 @@ intermediate over the 33 test phases of `kfg_vktest`.
 | analysis size | analysis (lavapipe) | of which motion search | mean PSNR | phases worse than full size | worst phase | engine test |
 |---|---|---|---|---|---|---|
 | full 1280x800 (current) | 174.3 ms | 101.4 ms (58 %) | 43.47 dB | - | - | PASS |
-| 768 000 px (~1131x707) | 140.7 ms (-19 %) | 81.4 ms | 42.88 dB | 19 of 33 | -3.87 dB | PASS |
+| 768 000 px (~1108x693) | 140.7 ms (-19 %) | 81.4 ms | 42.88 dB | 19 of 33 | -3.87 dB | PASS |
 | 512 000 px | 96.0 ms (-45 %) | 56.3 ms | 39.64 dB | 25 of 33 | -14.8 dB | 10 FAIL |
 | 360 000 px | 75.3 ms (-57 %) | 41.6 ms | 39.62 dB | 26 of 33 | -14.8 dB | 10 FAIL |
 
