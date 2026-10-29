@@ -151,7 +151,7 @@ source frame. The engine shaders are 1.4.4's except the cut path, so these are a
 | zoom (dolly) | 34.21 / 0.989 (16.27 / 0.417) | 33.15 / 0.982 | 31.84 / 0.982 | 28.52 |
 | occlusion / disocclusion | 37.43 / 0.993 (18.50 / 0.657) | 35.11 / 0.989 | 35.16 / 0.988 | 43.32 |
 | HUD + objects | 36.65 / 0.994 (28.20 / 0.974), HUD err 0.00 | 36.51 / 0.993 | 36.48 / 0.994 | 99 |
-| thin lines + HUD (new) | 27.73 / 0.944 (14.85 / 0.206), HUD err 0.22 | 32.66 / 0.985 | 32.66 / 0.984 | 25.37 |
+| thin lines + HUD (new) | 27.73 / 0.944 (14.85 / 0.206), HUD err 0.22 (after the follow-up: 27.75, HUD 0.00) | 32.66 / 0.985 | 32.66 / 0.984 | 25.37 |
 | stairs | 25.17 / 0.954 | 22.82 / 0.918 | 22.91 / 0.919 | 20.38 |
 | near object | 31.68 / 0.979 | 31.22 / 0.977 | 31.55 / 0.977 | 32.27 |
 | static | exact | exact | exact | exact |
@@ -169,12 +169,89 @@ source frame. The engine shaders are 1.4.4's except the cut path, so these are a
 - **Thin lines at t = 0.5 are 5 dB under 1/3 and 2/3.** Speed sweeps (9,3), (10,4), (9,0) and
   (4.5,1.5) px per frame show this follows whether the phase offset `t·v` lands on whole pixels,
   not the phase. At 10,4 px/frame, t = 0.5 is the best phase (35.0 dB) and 1/3 the worst (27.2 dB).
-  It is the Catmull-Rom resampling of one-pixel lines at sub-pixel positions, the same for x2 and x3.
-  It is not fixed here; a sharper resampler is engine work.
-- **Found in the sweep, not gated, not fixed:**
-  - Thin lines moving 3 px/frame purely vertically are flagged as a scene cut, so the frame repeats.
-    That is safe: no garbage frame.
-  - At 12 px/frame horizontally, the HUD error reaches 2.9 to 3.5, against a gate of 2.0.
+  See the follow-up below: a sharper resampler does not help.
+
+### Follow-up: the three problems the x2 tests found (on top of e10d039)
+
+**1. Thin lines at t = 0.5 come from the source, not the resampler. Nothing changed.**
+
+The ceiling was measured with the exact motion on the CPU (`KFG_IDEAL=1`): A and B are shifted by the
+true vector and resampled, and the interior (HUD and borders left out) is compared with the truth.
+
+| thin lines, interior PSNR | bilinear | Catmull-Rom 4×4 | Lanczos-2 4×4 | engine (5-tap Catmull-Rom) |
+|---|---|---|---|---|
+| 9,3 px/frame, t = 0.5 (half-pixel offsets) | 27.52 | 28.69 | 28.69 | 28.44 |
+| 10,4 px/frame, t = 1/3 | 27.01 | 27.59 | 27.67 | 27.64 |
+
+- With the exact motion and any kernel, half-pixel positions top out at 28.7 dB. The engine is
+  0.25 dB under that ceiling.
+- The cause is the scene itself: one-pixel lines rendered with box-filtered supersampling. No
+  interpolation can rebuild them at a half-pixel shift.
+- The engine was also tried with each kernel in the warp (`KFG_RESAMPLE`, 9 bilinear taps):
+
+| kernel in the warp | thin lines, whole frame (1/3, 2/3, 0.5) | pan | lavapipe warp time |
+|---|---|---|---|
+| 5-tap Catmull-Rom (shipped) | 32.66 / 32.66 / 27.73 | unchanged | 26–31 ms |
+| full Catmull-Rom | 32.65 / 32.65 / 27.67 | ±0.01 | +1–4 ms |
+| Lanczos-2 | 32.62 / 32.62 / 27.70 | ±0.01 | about the same |
+
+  The Deck estimate for the 9-tap kernels is +0.05 to 0.1 ms per output. With no quality gain,
+  neither was kept.
+
+**2. False scene cut on slow motion: fixed** (`kfg_stats.comp`).
+
+- **Cause:** the cut test called a pair "unexplained" when the motion residual exceeded 0.015 and
+  0.26 × the frame difference. A slow pan of 2 to 3 px/frame has a small frame difference.
+- **Not only thin lines:** plain pans at 0,2, 0,3 and 2,2 px/frame were also repeated as cuts. So
+  was the `slow_pan` temporal sequence: its PSNR is 29.18 → 34.43 dB now that it is interpolated.
+- **Fix:** a moderate residual now counts only with a scattered motion field, or when the residual is
+  most of the difference (above 0.85 ×, a cut to or from a flat picture). A block is scattered when
+  its vector differs from its right or lower neighbour by more than 4 px.
+- **Field scatter by scene:** a cut between two textures scatters 63 % of blocks. Pans, turns, the
+  stairs and the dolly scatter 2–25 %.
+- **New cut scenes, both caught:** `cut_to_flat` (a cut to a flat, dark picture) and `cut_stairs`
+  (from the stairs to an unrelated texture). The existing `scene_cut` is still caught.
+- **Sweep, thin lines and pan:** 0,1, 0,2, 0,3, 2,2, 0,7, 3,0, 9,3 and 24,6 px/frame now have no
+  false cuts.
+- **Cost:** two more flow reads per level-2 texel. The stats pass goes from 1.24 to 1.75 ms on
+  lavapipe. The estimate for the Deck is +0.05 to 0.13 ms. That uses the measured ratio of Deck to
+  lavapipe analysis time (6.07 ms in Deck run B against about 59 ms). The 0.13 ms bound assumes
+  this single-workgroup pass scales worse.
+
+**3. HUD error at 12 px/frame horizontal: fixed** (`kfg_warp.comp`).
+
+- **Cause:** the HUD's first and last text rows share 4×4 blocks with the world moving behind them,
+  and took its vector.
+- **Fix:** the warp now keeps a pixel still when a still block is among its four neighbours, the
+  pixel lies on a motion boundary, it is the same in both frames, and along one axis zero motion
+  explains it at least as well as the vector.
+- **Why both conditions are needed:** without the still-block and motion-boundary conditions,
+  objects passing over a static background lost 2 dB.
+- **Cost:** two reads gate the test, and only pixels on a motion boundary next to a still block pay
+  for it. No difference was measurable on lavapipe; the Deck estimate is under 0.03 ms.
+- **Motion blur:** a pixel kept still is also left out of the motion blur. At 15 px/frame
+  (`--lowbase`) the blur had still smeared the HUD rows, with a HUD error of 2.5–3.1.
+
+**Before → after (e10d039 → this change).** `thin_lines_v3` and `thin_lines_h12` are now gated
+scenes.
+
+| scene | t | PSNR before → after | SSIM before → after | HUD err |
+|---|---|---|---|---|
+| thin_lines_v3 (0,3) | 1/3 | 20.79 → 35.71 (was cut, repeated) | 0.802 → 0.995 | |
+| | 2/3 | 17.72 → 35.98 | 0.592 → 0.993 | |
+| | 1/2 | 18.82 → 31.24 | 0.666 → 0.976 | |
+| thin_lines_h12 (12,0) | 1/3 | 35.45 → 37.70 | 0.9975 → 0.9981 | 2.89 → 0.24 |
+| | 2/3 | 36.21 → 39.43 | 0.9971 → 0.9977 | 3.22 → 0.38 |
+| | 1/2 | 35.14 → 37.78 | 0.9969 → 0.9976 | 3.48 → 0.30 |
+| thin_lines (9,3) | 1/3, 2/3, 1/2 | 32.66 / 32.66 / 27.73 → 32.70 / 32.74 / 27.75 | equal | 0.11–0.22 → 0.00 |
+| slow_pan temporal | sequence | 29.18 → 34.43 | | |
+| camera / turn sequence | mean | 28.17 / 27.56 → 28.42 / 27.72 | | HUD max 3.85 / 4.36 → 2.53 / 4.00 |
+| all other scenes, every phase | | within −0.03 … +0.00 dB | within −0.0001 | |
+
+- **Acceptance:** no scene at any x2 or x3 phase is more than 0.03 dB worse. The worst is
+  objects_hud at t = 0.5, 36.65 → 36.62. SSIM is within 0.0001.
+- **Tests:** HDR checks, border checks, the sequence and `kfg_posttest` pass. The scheduler and
+  pacing tests are unchanged.
 
 ## Acceptance against 1.4.4 at the same settings (`compare_sched.py`, 39 scenarios × 3 seeds, B/C/D replays)
 

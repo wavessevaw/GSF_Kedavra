@@ -50,6 +50,10 @@ static const scene SCENES[] = {
 	// a top-down turn) and one-pixel lines (wires, fences, UI rules) panning under a HUD.
 	{ "rotation", S_ROTATE, 0, 0, true, false },
 	{ "thin_lines", S_LINES, 9, 3, true, false },
+	// Slow vertical lines (3 px/frame) read as a cut before GSF 1.5; at 12 px/frame horizontal
+	// the HUD's edge rows took the world's vector.
+	{ "thin_lines_v3", S_LINES, 0, 3, true, false },
+	{ "thin_lines_h12", S_LINES, 12, 0, true, false },
 	// Cuts the field-coherence test must still catch: to a flat dark picture (loading) and
 	// from the stairs to unrelated texture.
 	{ "cut_to_flat", S_CUT_FLAT, 0, 0, false, true },

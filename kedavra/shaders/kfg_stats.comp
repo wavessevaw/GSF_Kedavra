@@ -403,13 +403,7 @@ void main()
 		ivec2 q = ivec2(i % size.x, i / size.x);
 		vec2 f = texelFetch(s_samplers[2], q, 0).xy * 0.25; // pixels -> level-2 texels
 		float a = texelFetch(s_samplers[0], q, 0).r;
-		// The level-2 field is quantised to 2-4 pixels: a slow pan of 3 px/frame reads as 4, and
-		// the 1 px left over looked like a cut (GSF 1.5). Take the best of the vector and the
-		// vector one pixel (a quarter texel) off in each direction.
-		float e_mc = 1e9;
-		for (int dy = -1; dy <= 1; dy++)
-			for (int dx = -1; dx <= 1; dx++)
-				e_mc = min(e_mc, abs(a - kfg_tap(1, vec2(q) + f + 0.25 * vec2(dx, dy), size).r));
+		float e_mc = abs(a - kfg_tap(1, vec2(q) + f, size).r);
 		float e_zero = abs(a - texelFetch(s_samplers[1], q, 0).r);
 		// Field coherence: a block whose vector differs from its right or lower neighbour's
 		// by more than one texel (4 px). Motion is smooth almost everywhere; between two
@@ -447,7 +441,7 @@ void main()
 		// turns: up to 25 % of blocks off their neighbours; a cut between two textures: 63 %),
 		// or to be most of the frame difference (a cut to or from a flat picture).
 		float incoherent = s_inc[0] / total;
-		bool unexplained = mean_mc > 0.012 && (incoherent > 0.4 || mean_mc > 0.6 * mean_zero);
+		bool unexplained = mean_mc > 0.012 && (incoherent > 0.4 || mean_mc > 0.85 * mean_zero);
 		float cut = (frac_bad > u_cutThreshold || unexplained) ? 1.0 : 0.0;
 		imageStore(dst, ivec2(0, 0), vec4(cut, frac_bad, s_mc[0] / total, s_zero[0] / total));
 	}
