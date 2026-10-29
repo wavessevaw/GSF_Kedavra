@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -46,6 +46,18 @@ static const scene SCENES[] = {
 	{ "dolly_stairs", S_DOLLY_STAIRS, 0, 0, true, false },
 	{ "near_object", S_NEAR, 12, 0, true, false },
 	{ "climb", S_CLIMB, 0, 0, true, false },
+	// GSF 1.5: in-plane rotation (4 degrees per frame about the centre) and one-pixel lines
+	// (wires, fences, UI rules) panning under a HUD.
+	{ "rotation", S_ROTATE, 0, 0, true, false },
+	{ "thin_lines", S_LINES, 9, 3, true, false },
+	// Slow vertical lines (3 px/frame) read as a cut before GSF 1.5; at 12 px/frame horizontal
+	// the HUD's edge rows took the world's vector.
+	{ "thin_lines_v3", S_LINES, 0, 3, true, false },
+	{ "thin_lines_h12", S_LINES, 12, 0, true, false },
+	// Cuts the field-coherence test must still catch: to a flat dark picture (loading) and
+	// from the stairs to unrelated texture.
+	{ "cut_to_flat", S_CUT_FLAT, 0, 0, false, true },
+	{ "cut_stairs", S_CUT_STAIRS, 0, 0, false, true },
 };
 
 // Low base frame rate (--lowbase): every source interval is 1.25 times longer, so all
@@ -214,6 +226,39 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 		return;
 	case S_CUT:
 		background(x, y, t < 0.5 ? 1 : 50, rgb);
+		return;
+	case S_ROTATE: {
+		const double a = -4.0 * 3.14159265358979 / 180.0 * t, cx = 640, cy = 400;
+		const double dx = x - cx, dy = y - cy;
+		background(cx + dx * cos(a) - dy * sin(a), cy + dx * sin(a) + dy * cos(a), 5, rgb);
+		return;
+	}
+	case S_LINES: {
+		if (hud(x, y, w, h, rgb))
+			return;
+		const double u = x - s->vx * t, v = y - s->vy * t;
+		background(u, v, 17, rgb);
+		// One-pixel bright lines every 23 px (vertical) and 31 px (horizontal), box-filtered
+		// so that a sub-pixel position is a partial pixel, as a game renders them.
+		const double fu = fmod(fmod(u, 23.0) + 23.0, 23.0), fv = fmod(fmod(v, 31.0) + 31.0, 31.0);
+		const double cu = fu < 1.0 ? 1.0 - fu : fu > 22.0 ? fu - 22.0 : 0.0;
+		const double cv = fv < 1.0 ? 1.0 - fv : fv > 30.0 ? fv - 30.0 : 0.0;
+		const double c = cu > cv ? cu : cv;
+		for (int k = 0; k < 3; k++)
+			rgb[k] = rgb[k] * (1.0 - c) + 0.95 * c;
+		return;
+	}
+	case S_CUT_FLAT:
+		if (t < 0.5)
+			background(x, y, 1, rgb);
+		else
+			rgb[0] = rgb[1] = rgb[2] = 0.06;
+		return;
+	case S_CUT_STAIRS:
+		if (t < 0.5)
+			stairs(x, y, rgb);
+		else
+			background(x, y, 31, rgb);
 		return;
 	case S_PAN:
 	case S_FASTPAN:
@@ -597,7 +642,7 @@ static int hdr_checks(kfg_vk *vk, int w, int h, int transfer, FILE *js)
 					gain = g;
 				if (g < 3.0) { ok = false; why = "not better than blend/duplicate by 3 dB"; }
 			} else if (s->cut) {
-				if (max_abs(G, D, nbytes) > 0) { ok = false; why = "scene cut blended"; }
+				if (max_abs(G, A, nbytes) > 0) { ok = false; why = "scene cut not the real frame A"; }
 			} else {
 				if (max_abs(G, A, nbytes) > 1) { ok = false; why = "static scene changed"; }
 				// The float values themselves, highlights above 1.0 included (scRGB).
@@ -821,8 +866,8 @@ int main(int argc, char **argv)
 				ol = psnr_region(L, T, w, h, 380, 380, 900, h);
 				od = psnr_region(D, T, w, h, 380, 380, 900, h);
 			}
-			double hud_err = s->kind == S_OBJECTS ? mean_abs(G, T, w, h, 40, 30, 360, 70) : 0.0;
-			int maxd = max_abs(G, s->cut ? D : A, nbytes);
+			double hud_err = s->kind == S_OBJECTS || s->kind == S_LINES ? mean_abs(G, T, w, h, 40, 30, 360, 70) : 0.0;
+			int maxd = max_abs(G, A, nbytes);  // a cut repeats the real frame A at every phase
 			bool ok = true;
 			const char *why = "";
 			if (s->dynamic) {
@@ -831,7 +876,7 @@ int main(int argc, char **argv)
 				if (!(ma > 0.5 && mb > 0.5)) { ok = false; why = "output equals a source frame"; }
 				if (hud_err > 2.0) { ok = false; why = "HUD distorted"; }
 			} else if (s->cut) {
-				if (maxd > 0) { ok = false; why = "scene cut blended"; }
+				if (maxd > 0) { ok = false; why = "scene cut not the real frame A"; }
 			} else {
 				if (maxd > 1) { ok = false; why = "static scene changed"; }
 			}

@@ -38,6 +38,15 @@ vec4 tap_sharp(int slot, vec2 pos, ivec2 size)
 	return (u_flags & KFG_FLAG_SCRGB) != 0 ? r : max(r, vec4(0.0));
 }
 
+// Mean colour difference of A at pa and B at pb over three taps along one axis (centre, +-d).
+float line_error(vec2 pa, vec2 pb, vec2 d, ivec2 size)
+{
+	float e = 0.0;
+	for (int i = -1; i <= 1; i++)
+		e += dot(abs(kfg_tap(0, pa + float(i) * d, size).rgb - kfg_tap(1, pb + float(i) * d, size).rgb), vec3(1.0));
+	return e * (1.0 / 3.0);
+}
+
 void main()
 {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
@@ -46,8 +55,9 @@ void main()
 	ivec2 size = u_fullSize;
 	vec4 stats = texelFetch(s_samplers[3], ivec2(0), 0);
 	if (stats.x > 0.5) {
-		// Scene cut: never blend two unrelated images.
-		vec4 c = u_t < 0.5 ? texelFetch(s_samplers[0], p, 0) : texelFetch(s_samplers[1], p, 0);
+		// Scene cut (or a pair motion does not explain): never blend two unrelated images, and
+		// never show B before its own time (GSF 1.5): every phase repeats the real frame A.
+		vec4 c = texelFetch(s_samplers[0], p, 0);
 		imageStore(dst, p, vec4(c.rgb, 1.0));
 		return;
 	}
@@ -76,6 +86,8 @@ void main()
 	vec4 s01 = texelFetch(s_samplers[2], clamp(b0 + ivec2(0, 1), ivec2(0), bsize - 1), 0);
 	vec4 s11 = texelFetch(s_samplers[2], clamp(b0 + ivec2(1, 1), ivec2(0), bsize - 1), 0);
 	vec4 sel;
+	// A still block next to this pixel (HUD, static world), for the static test below.
+	const bool still_near = s00.xy == vec2(0.0) || s10.xy == vec2(0.0) || s01.xy == vec2(0.0) || s11.xy == vec2(0.0);
 	// Only a threshold is needed: avoid three square roots per output pixel.
 	vec2 d10 = s00.xy - s10.xy, d01 = s00.xy - s01.xy, d11 = s00.xy - s11.xy;
 	float spread2 = max(max(dot(d10, d10), dot(d01, d01)), dot(d11, d11));
@@ -102,6 +114,27 @@ void main()
 	vec2 v = sel.xy * sc;
 	vec2 pa = vec2(p) - u_t * v;
 	vec2 pb = vec2(p) + (1.0 - u_t) * v;
+	// Static content against a moving neighbour (GSF 1.5): a HUD's edge rows share their 4x4
+	// blocks with the world moving behind it and took its vector. Where the pixel and its
+	// cross are the same in both frames and the vector explains them no better, the pixel
+	// stays where it is. Two reads gate it.
+	bool still = false;
+	if (pair && v != vec2(0.0) && still_near && spread2 >= 4.0) {
+		vec3 a0 = texelFetch(s_samplers[0], p, 0).rgb, b0 = texelFetch(s_samplers[1], p, 0).rgb;
+		if (dot(abs(a0 - b0), vec3(1.0)) < 0.03) {
+			// Along each axis on its own: at a HUD's top row the vertical arm reaches the world.
+			float ezh = line_error(vec2(p), vec2(p), vec2(2.0, 0.0), size), ezv = line_error(vec2(p), vec2(p), vec2(0.0, 2.0), size);
+			float esh = line_error(pa, pb, vec2(2.0, 0.0), size), esv = line_error(pa, pb, vec2(0.0, 2.0), size);
+			// A tie goes to staying put: glyphs repeat, and the moved position often matches too.
+			if ((ezh < 0.015 && ezh <= esh) || (ezv < 0.015 && ezv <= esv)) {
+				pa = vec2(p);
+				pb = vec2(p);
+				v = vec2(0.0);
+				sel.w = min(sel.w, 0.05);
+				still = true;
+			}
+		}
+	}
 	// Out-of-frame samples: take the other side when only one is inside the image.
 	bool ina = all(greaterThanEqual(pa, vec2(0.0))) && all(lessThan(pa, vec2(size)));
 	bool inb = all(greaterThanEqual(pb, vec2(0.0))) && all(lessThan(pb, vec2(size)));
@@ -133,7 +166,7 @@ void main()
 #else
 	const float blur = clamp((length(sel.xy) - 10.0) * 0.08, 0.0, 4.0);  // analysis pixels
 #endif
-	if (blur > 0.25) {
+	if (blur > 0.25 && !still) {
 		vec2 o = normalize(v) * (0.5 * blur) * sc;
 		vec3 sa = w_b < 1.0 ? kfg_tap(0, pa - o, size).rgb + kfg_tap(0, pa + o, size).rgb : vec3(0.0);
 		vec3 sb = w_b > 0.0 ? kfg_tap(1, pb - o, size).rgb + kfg_tap(1, pb + o, size).rgb : vec3(0.0);
