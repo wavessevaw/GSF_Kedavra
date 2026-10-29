@@ -271,6 +271,53 @@ static void hturn(const scene *s, double t, double x, double y, double rgb[3])
 	background(ang * H_F, y, 47, rgb);
 }
 
+// True motion of the yard (a static world under a moving camera): the world point seen at
+// (x, y) at time t, projected with the camera of time t1. Returns the kind hit (0 sky,
+// 1 ground, 2 pillar) and the position at t1 in *x1, *y1 (false if behind the camera).
+static bool hturn_project(const scene *s, double t, double t1, double x, double y, double *x1, double *y1, int *kind)
+{
+	const double yaw = s->vx / H_F * t, cz = s->vy * t;
+	const double dxc = (x - H_CX) / H_F, dyc = -(y - H_CY) / H_F;
+	const double c = cos(yaw), sn = sin(yaw);
+	const double dx = dxc * c + sn, dz = -dxc * sn + c;
+	double best = 1e9;
+	for (int i = 0; i < H_NPILLAR; i++) {
+		const double px = H_PILLAR[i][0], pz = H_PILLAR[i][1] - cz;
+		const double a = dx * dx + dz * dz, b = -2.0 * (dx * px + dz * pz), cc = px * px + pz * pz - 0.16;
+		const double disc = b * b - 4 * a * cc;
+		if (disc < 0)
+			continue;
+		const double sh = (-b - sqrt(disc)) / (2 * a);
+		if (sh <= 0.05 || sh >= best)
+			continue;
+		const double hy = H_CAM + dyc * sh;
+		if (hy < 0 || hy > 3.2)
+			continue;
+		best = sh;
+	}
+	const double sg = dyc < 0 ? H_CAM / -dyc : 1e9;
+	const double yaw1 = s->vx / H_F * t1, cz1 = s->vy * t1, c1 = cos(yaw1), s1 = sin(yaw1);
+	double X, Y, Z;  // relative to the camera at t1 (or a direction for the sky)
+	if ((best < 1e9 && best < sg) || sg < 60.0) {
+		const double d = best < sg ? best : sg;
+		*kind = best < sg ? 2 : 1;
+		X = dx * d;
+		Y = dyc * d;
+		Z = dz * d + cz - cz1;
+	} else {
+		*kind = 0;
+		X = dx;
+		Y = dyc;
+		Z = dz;
+	}
+	const double xc = c1 * X - s1 * Z, zc = s1 * X + c1 * Z;
+	if (zc <= 0.01)
+		return false;
+	*x1 = H_CX + H_F * xc / zc;
+	*y1 = *kind ? H_CY - H_F * Y / zc : y;  // the panorama is cylindrical: rows stay rows
+	return true;
+}
+
 static void hpar(const scene *s, double t, double x, double y, double rgb[3])
 {
 	// Layered pan: far hills (0.35 v), a fence of thin posts and rails (v), near foliage (1.6 v).
@@ -1011,6 +1058,36 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				run_plan(e, &p, NULL, NULL);
 				if (f == 0)
 					continue;
+				if (getenv("KFG_HARD_FIELD") && (s->kind == S_HTURN || s->kind == S_HTURN_DARK) && mode == 3) {
+					// Field accuracy against the true motion of the content at each block at
+					// mid-phase, by what it is (sky, ground, pillar).
+				  for (int lv = 1; lv <= KFG_LEVELS; lv++) {
+					// lv 1: the pair's field (4 px blocks), else the flow of level lv (2^lv px).
+					const kfg_vk_image *im = lv == 1 ? &e->pair_select[fb] : &e->flow[fb][lv];
+					const double bsz = lv == 1 ? 4.0 : (double)(1 << lv);
+					const size_t nf = (size_t)im->width * im->height;
+					float *fl = malloc(nf * 4 * sizeof(float));
+					kfg_vk_download_rgba16f(vk, im, fl);
+					int n[3] = {0}, ok1[3] = {0}, ok4[3] = {0};
+					for (size_t i = 0; i < nf; i++) {
+						const double cx = ((double)(i % im->width) + 0.5) * bsz, cy = ((double)(i / im->width) + 0.5) * bsz;
+						double xa, ya, xb, yb;
+						int k, k2;
+						// The field: content at the block at mid-phase; the flow: A's block, forward.
+						const double t0 = lv == 1 ? f - 0.5 : f - 1.0;
+						if (!hturn_project(s, t0, f - 1.0, cx, cy, &xa, &ya, &k) || !hturn_project(s, t0, (double)f, cx, cy, &xb, &yb, &k2))
+							continue;
+						const double d = hypot(fl[i * 4] - (xb - xa), fl[i * 4 + 1] - (yb - ya));
+						n[k]++;
+						ok1[k] += d < 1.0;
+						ok4[k] += d < 4.0;
+					}
+					printf("  f%d %s within 1 / 4 px: sky %.0f%%/%.0f%% ground %.0f%%/%.0f%% pillars %.0f%%/%.0f%% (blocks %d/%d/%d)\n", f, lv == 1 ? "field" : lv == 2 ? "L2   " : lv == 3 ? "L3   " : "L4   ",
+					       100.0 * ok1[0] / (n[0] + 1e-9), 100.0 * ok4[0] / (n[0] + 1e-9), 100.0 * ok1[1] / (n[1] + 1e-9), 100.0 * ok4[1] / (n[1] + 1e-9),
+					       100.0 * ok1[2] / (n[2] + 1e-9), 100.0 * ok4[2] / (n[2] + 1e-9), n[0], n[1], n[2]);
+					free(fl);
+				  }
+				}
 				if (getenv("KFG_HARD_FIELD") && (s->kind == S_HLINES || s->kind == S_PAN || s->kind == S_HPAR) && mode == 3) {
 					// Tuning aid: share of blocks of the pair's field (and of the level-2 flow) within
 					// 0.25 / 0.5 / 1 px of the true motion (the uniform layer: lines, the pan, the fence).
@@ -1073,6 +1150,12 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 						run_plan(e, &p, NULL, NULL);
 						kfg_vk_download_rgba8(vk, &e->output, O);
 						const double pg = psnr_region(O, T, w, h, 0, 0, w, h);
+						float st[16];
+						if (getenv("KFG_HARD_VERBOSE"))
+							kfg_vk_download_rgba16f(vk, &e->stats[fb], st);
+						if (getenv("KFG_HARD_VERBOSE"))
+							printf("  f%d t=%d/%d cut=%.0f bad=%.3f mc=%.4f zero=%.4f psnr %.2f dB (left 96 px %.2f, right 96 px %.2f)\n", f, j, mode, st[0], st[1], st[2], st[3], pg,
+							       psnr_region(O, T, w, h, 0, 0, 96, h), psnr_region(O, T, w, h, w - 96, 0, w, h));
 						ps += pg;
 						worst = pg < worst ? pg : worst;
 						const blockiness bm = block_metric(O, T, w, h);
