@@ -145,9 +145,12 @@ void main()
 		// One step refined: average the vector here with the one where that step lands. A
 		// moving edge then splits between the two fields (lavapipe: best balance of camera
 		// worst frame against the climb sequence).
-		vec2 b1 = bp - (u_t - 0.5) * 0.25 * v0;
-		v0 = 0.5 * (v0 + texelFetch(s_samplers[2], clamp(ivec2(floor(b1 + 0.5)), ivec2(0), bsize - 1), 0).xy);
-		bp -= (u_t - 0.5) * 0.25 * v0;
+		// A zero vector cannot move the lookup: a second fetch reads the same texel.
+		if (v0 != vec2(0.0)) {
+			vec2 b1 = bp - (u_t - 0.5) * 0.25 * v0;
+			v0 = 0.5 * (v0 + texelFetch(s_samplers[2], clamp(ivec2(floor(b1 + 0.5)), ivec2(0), bsize - 1), 0).xy);
+			bp -= (u_t - 0.5) * 0.25 * v0;
+		}
 	}
 	ivec2 b0 = ivec2(floor(bp));
 	vec2 fr = bp - vec2(b0);
