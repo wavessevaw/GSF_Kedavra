@@ -164,7 +164,7 @@ index 0636ad0..01c9acb 100644
  	SHADER_TYPE_COUNT
  };
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 397a112..2e81680 100644
+index 397a112..6fa5617 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -124,6 +124,7 @@ static const int g_nBaseCursorScale = 36;
@@ -193,18 +193,29 @@ index 397a112..2e81680 100644
  	{
  		return;
  	}
-@@ -6864,10 +6874,22 @@ static bool steamcompmgr_should_vblank_window( bool bShouldLimitFPS, uint64_t vb
+@@ -6833,6 +6843,8 @@ static std::optional<uint64_t> s_oLowestFPSLimitScheduleVRR;
+ 
+ // Display vblank index of the previous vblank pass. The limiter opens when a pass crosses a divisor boundary.
+ static uint64_t s_ulPrevVBlankIdx = 0;
++// KEDAVRA: vblank index of the last FIFO game frame latched under the base cap.
++static uint64_t s_ulKfgLatchIdx = UINT64_MAX;
+ 
+ static bool steamcompmgr_should_vblank_window( bool bShouldLimitFPS, uint64_t vblank_idx, steamcompmgr_win_t *w = nullptr, uint64_t now = 0 )
+ {
+@@ -6864,10 +6876,24 @@ static bool steamcompmgr_should_vblank_window( bool bShouldLimitFPS, uint64_t vb
  	{
  		if ( g_nSteamCompMgrTargetFPS && bShouldLimitFPS && nRefreshHz > nTargetFPS )
  		{
 -			int nVblankDivisor = nRefreshHz / nTargetFPS;
-+			if ( nRefreshHz % nTargetFPS && kfg::SourceCapFPS( nRefreshHz ) == nTargetFPS )
++			if ( kfg::SourceCapFPS( nRefreshHz ) == nTargetFPS )
 +			{
-+				// KEDAVRA base cap that does not divide the refresh (40 at 90 Hz): release
-+				// frames on the vblanks where target / refresh steps, so the game gets exactly
-+				// the target rate (2, 2, 3, ... vblanks) and generation fills every vblank.
++				// KEDAVRA base cap: one game frame per slot of the cap (40 at 90 Hz: 2, 2, 2, 3
++				// vblanks), released on any vblank of a slot that has not latched one yet. A frame
++				// that misses the start of its slot latches on the next vblank instead of waiting
++				// for the next slot, so a game just under the cap keeps its own rate rather than
++				// dropping to half of it.
 +				const uint64_t uT = uint64_t( nTargetFPS ), uR = uint64_t( nRefreshHz );
-+				if ( vblank_idx * uT / uR == s_ulPrevVBlankIdx * uT / uR )
++				if ( s_ulKfgLatchIdx != UINT64_MAX && vblank_idx * uT / uR <= s_ulKfgLatchIdx * uT / uR )
 +					bSendCallback = false;
 +			}
 +			else
@@ -219,7 +230,31 @@ index 397a112..2e81680 100644
  		}
  	}
  
-@@ -10530,6 +10552,22 @@ steamcompmgr_main(int argc, char **argv)
+@@ -8127,7 +8153,11 @@ void handle_done_commits_xwayland( xwayland_ctx_t *ctx, bool vblank, uint64_t vb
+ 		if ( result == gamescope::CommitQueue::SelectionResult::Blocked )
+ 			commits_before_their_time.push_back( entry );
+ 		else if ( result == gamescope::CommitQueue::SelectionResult::Ready && entry.fifo )
++		{
+ 			fifo_win_seqs.insert(entry.winSeq);
++			if ( steamcompmgr_window_should_limit_fps( entry_win ) )
++				s_ulKfgLatchIdx = vblank_idx;
++		}
+ 	}
+ 
+ 	ctx->doneCommits->listCommitsDone.swap( commits_before_their_time );
+@@ -8178,7 +8208,11 @@ void handle_done_commits_xdg( bool vblank, uint64_t vblank_idx )
+ 		if ( result == gamescope::CommitQueue::SelectionResult::Blocked )
+ 			commits_before_their_time.push_back( entry );
+ 		else if ( result == gamescope::CommitQueue::SelectionResult::Ready && entry.fifo )
++		{
+ 			fifo_win_seqs.insert(entry.winSeq);
++			if ( steamcompmgr_window_should_limit_fps( entry_win ) )
++				s_ulKfgLatchIdx = vblank_idx;
++		}
+ 	}
+ 
+ 	g_steamcompmgr_xdg_done_commits->listCommitsDone.swap( commits_before_their_time );
+@@ -10530,6 +10564,22 @@ steamcompmgr_main(int argc, char **argv)
  			int nRealRefreshmHz = g_nNestedRefresh ? g_nNestedRefresh : g_nOutputRefresh;
  			g_SteamCompMgrAppRefreshCycle = gamescope::mHzToRefreshCycle( nRealRefreshmHz );
  			g_SteamCompMgrLimitedAppRefreshCycle = g_SteamCompMgrAppRefreshCycle;
@@ -242,7 +277,7 @@ index 397a112..2e81680 100644
  			if ( g_nSteamCompMgrTargetFPS )
  			{
  				int nRealRefreshHz = gamescope::ConvertmHzToHz( nRealRefreshmHz );
-@@ -10545,6 +10583,8 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10545,6 +10595,8 @@ steamcompmgr_main(int argc, char **argv)
  					int nVblankDivisor = nRealRefreshHz / nTargetFPS;
  
  					g_SteamCompMgrLimitedAppRefreshCycle = g_SteamCompMgrAppRefreshCycle * nVblankDivisor;
@@ -251,7 +286,7 @@ index 397a112..2e81680 100644
  				}
  			}
  		}
-@@ -10804,6 +10844,10 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10804,6 +10856,10 @@ steamcompmgr_main(int argc, char **argv)
  			// A false vblank value means bShouldPaint will resolve to false below, effectively ignoring this flag and losing any request
  			// to force a repaint. Don't clear g_bForceRepaint unless vblank is true.
  			const bool bForceRepaint = vblank && g_bForceRepaint.exchange(false);

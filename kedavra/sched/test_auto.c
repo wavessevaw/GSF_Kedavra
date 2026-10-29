@@ -146,16 +146,17 @@ int main(void)
 	CHECK(lv.nlevels == 1 && lv.levels[0] == 30 && lv.mult == 2, "caps at 60 Hz (a TV): 30 only, x2");
 	kfg_auto_init(&lv, 120);
 	CHECK(lv.nlevels == 5 && lv.levels[0] == 40 && lv.levels[4] == 60, "caps at 120 Hz: 40 45 50 55 60");
+	// GSF 1.5: never more than two generated frames per real one, so never below refresh / 3.
 	kfg_auto_init_floor(&lv, 120, 24);
-	CHECK(lv.levels[0] == 30 && lv.mult == 4, "floor at 120 Hz: 30 (x4, only when asked for)");
+	CHECK(lv.levels[0] == 40 && lv.mult == 3, "floor at 120 Hz: 40 (x3), not 30 (x4)");
 	kfg_auto_init_floor(&lv, 90, 24);
-	CHECK(lv.nlevels == 5 && lv.levels[0] == 24 && lv.levels[1] == 30 && lv.mult == 4, "floor 24 at 90 Hz: 24 30 35 40 45, x3.75");
+	CHECK(lv.nlevels == 4 && lv.levels[0] == 30 && lv.mult == 3, "floor 24 at 90 Hz: 30 35 40 45, x3 at most");
 	kfg_auto_init_floor(&lv, 90, 10);
-	CHECK(lv.levels[0] == 24, "the floor never goes below 24 or refresh / 4 (%u)", lv.levels[0]);
+	CHECK(lv.levels[0] == 30, "the floor never goes below refresh / 3 (%u)", lv.levels[0]);
 	kfg_auto_init_floor(&lv, 90, 40);
 	CHECK(lv.nlevels == 4 && lv.levels[0] == 30, "a floor above refresh / 3 changes nothing");
 	kfg_auto_init_floor(&lv, 60, 16);
-	CHECK(lv.nlevels == 2 && lv.levels[0] == 24 && lv.levels[1] == 30 && lv.mult == 3, "at 60 Hz the floor is 24 (x2.5), never lower");
+	CHECK(lv.nlevels == 2 && lv.levels[0] == 20 && lv.levels[1] == 30 && lv.mult == 3, "at 60 Hz the floor is 20 (x3), never lower");
 
 	r = run(fps60, 300, 0.10);
 	printf("native 60:  cap 45 %.1f%%, mean cap %.1f, switches %llu, late %.3f%%\n", 100 * r.x2_fraction, r.cap_avg, (unsigned long long)r.switches, 100 * r.late_fraction);
@@ -184,12 +185,12 @@ int main(void)
 	printf("native 22:  mean cap %.1f, switches %llu\n", r.cap_avg, (unsigned long long)r.switches);
 	CHECK(r.cap_avg < 30.5, "a 22 fps game stays at the lowest cap (x3)");
 
-	// Floor 24 (x3.75, Battery): a 27 fps game cannot hold 30 and settles at 24, clean.
+	// Floor 24 asked for (the old x3.75 Battery floor): since GSF 1.5 Auto stays at x3, a 27 fps
+	// game keeps cap 30 and the scheduler holds its long frames.
 	g_floor = 24;
 	r = run(fps27, 600, 0.05);
 	printf("floor 24, native 27:  mean cap %.1f, switches %llu, late %.3f%%, uneven motion %.2f%%\n", r.cap_avg, (unsigned long long)r.switches, 100 * r.late_fraction, 100 * r.uneven);
-	CHECK(r.cap_avg > 23.5 && r.cap_avg < 25.5, "a 27 fps game should hold 24 with the x3.75 floor (mean %.1f)", r.cap_avg);
-	CHECK(r.late_fraction < 0.02, "a 27 fps game at cap 24 is late %.3f%%", 100 * r.late_fraction);
+	CHECK(r.cap_avg > 29.5 && r.cap_avg < 30.5, "a 27 fps game stays at cap 30 (x3) whatever the floor (mean %.1f)", r.cap_avg);
 	r = run(fps60, 300, 0.10);
 	printf("floor 24, native 60:  cap 45 %.1f%%\n", 100 * r.x2_fraction);
 	CHECK(r.x2_fraction > 0.97, "the floor does not hold back a fast game (45 for %.1f%%)", 100 * r.x2_fraction);

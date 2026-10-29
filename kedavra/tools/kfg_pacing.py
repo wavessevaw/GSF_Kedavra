@@ -238,7 +238,9 @@ def analyze(rows, sources=None, skip_s=2.0, exclude=(), expect_mult=None, only_a
         unobserved += max(0, int(math.floor(dt / float(b["refresh_ns"]) + 0.5)) - 1)
     # These are inferred fixed-refresh slots. Logger loss and an absent physical flip
     # cannot be distinguished without sequence/commit identity: never call this optical proof.
-    missed = (kinds.get("repeat", 0) + unobserved) / (n + unobserved)
+    # A scene cut holds real frame A until B's time (GSF 1.5): a deliberate repeat, not a miss.
+    cut_holds = reasons.get("cut", 0)
+    missed = (kinds.get("repeat", 0) - cut_holds + unobserved) / (n + unobserved)
     report = {
         "rows": n,
         "duration_s": (float(sel[-1]["flip_ns"]) - float(sel[0]["flip_ns"])) / 1e9,
@@ -247,6 +249,7 @@ def analyze(rows, sources=None, skip_s=2.0, exclude=(), expect_mult=None, only_a
         "repeat_reasons": dict(reasons),
         "missed_fraction": missed,
         "repeat_row_fraction": kinds.get("repeat", 0) / n,
+        "cut_holds": cut_holds,
         "unobserved_slots": unobserved,
         "estimated_refresh_slots": n + unobserved,
         "slot_count_basis": "fixed-refresh timestamps; lossless trace assumed",

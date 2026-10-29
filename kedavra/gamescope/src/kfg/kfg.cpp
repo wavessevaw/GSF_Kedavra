@@ -38,8 +38,8 @@ namespace kfg
 {
 	static LogScope kfg_log( "kfg" );
 
-	gamescope::ConVar<int> cv_kfg_multiplier{ "kfg_multiplier", 0, "KEDAVRA frame generation: 0 = off, 1 = auto (x2 to x3 from the game's frame rate; to x3.75 with kfg_auto_floor), 2 = x2, 3 = x3." };
-	gamescope::ConVar<int> cv_kfg_base_fps{ "kfg_base_fps", 0, "KEDAVRA base frame cap: the game is limited to this many frames per second before generation fills the refresh (any value from 20 up; 0 = from kfg_multiplier). Needs kfg_multiplier != 0." };
+	gamescope::ConVar<int> cv_kfg_multiplier{ "kfg_multiplier", 0, "KEDAVRA frame generation: 0 = off, 1 = auto (x2 to x3 from the game's frame rate), 2 = x2, 3 = x3. At most two generated frames between two real ones (GSF 1.5)." };
+	gamescope::ConVar<int> cv_kfg_base_fps{ "kfg_base_fps", 0, "KEDAVRA base frame cap: the game is limited to this many frames per second before generation fills the refresh (from refresh / 3 up, at least 20; 0 = from kfg_multiplier). Needs kfg_multiplier != 0." };
 
 	// String convars are set by gamescopectl on the Wayland server thread while the
 	// compositor thread reads them; assigning a std::string under a concurrent reader is
@@ -71,7 +71,8 @@ namespace kfg
 	// A controller sets kfg_multiplier, kfg_base_fps and kfg_post, then kfg_policy to a new
 	// revision; the status file echoes the revision with the values in force, so the
 	// controller knows its whole policy arrived.
-	gamescope::ConVar<int> cv_kfg_auto_floor{ "kfg_auto_floor", 0, "Lowest base cap Auto may use, in fps: 0 = refresh / 3 (x3, at least 30); down to 24 or refresh / 4, whichever is higher (90 Hz: 24, x3.75; 60 Hz: 24, x2.5; 120 Hz: 30, x4)." };
+	gamescope::ConVar<int> cv_kfg_auto_floor{ "kfg_auto_floor", 0, "Lowest base cap Auto may use, in fps: 0 = refresh / 3 (x3, at least 30); since GSF 1.5 never below refresh / 3 (at most two generated frames per real one)." };
+	gamescope::ConVar<int> cv_kfg_strict{ "kfg_strict", 1, "Honest multiplier (GSF 1.5): xN (N <= 3) shows N - 1 generated frames between two real frames, never more than two; an interval longer than N vblanks holds pictures instead of generating more, and a stall repeats the last frame. 1 = strict xN (default; 2 and 3 are accepted and behave as 1), 0 = fill (Autopilot): the same limit." };
 	gamescope::ConVar<int> cv_kfg_analysis_pixels{ "kfg_analysis_pixels", 1536 * 960, "Pixel count KEDAVRA's motion analysis works at: larger games (1080p, 4K) are analysed scaled down to it and only the final warp runs at their own size. 0 = always the game's own size." };
 	gamescope::ConVar<bool> cv_kfg_hold_vrr{ "kfg_hold_vrr", true, "With generation on (Auto or a fixed mode), keep the display at its fixed refresh rate: generated frames need a vblank grid, which adaptive sync (VRR) does not give." };
 	gamescope::ConVar<bool> cv_kfg_hdr{ "kfg_hdr", true, "Generate and filter HDR games too (HDR10 PQ and scRGB, in float frames). false = HDR games pass through untouched." };
@@ -147,6 +148,10 @@ namespace kfg
 		uint64_t ulPendingID = 0;
 		int64_t nPendingVBlank = 0;
 		kfg_decision pending{};
+
+		// Status: scheduler counters at the previous status write (shown and generated frames
+		// per real frame over the last second).
+		uint64_t ulPrevReal = 0, ulPrevGen = 0, ulPrevRepeat = 0;
 
 		// Counters (status file).
 		uint64_t ulPaints = 0, ulApplied = 0, ulBypass = 0, ulRingMiss = 0, ulUnsupported = 0;
@@ -963,6 +968,12 @@ namespace kfg
 		if ( !f )
 			return;
 		const kfg_sched &q = s.sched;
+		// The multiplier as shown over the last second: outputs and generated frames per real one.
+		const uint64_t ulDReal = q.n_real - std::min( q.n_real, s.ulPrevReal );
+		const uint64_t ulDGen = q.n_gen - std::min( q.n_gen, s.ulPrevGen );
+		const uint64_t ulDRepeat = q.n_repeat - std::min( q.n_repeat, s.ulPrevRepeat );
+		const double flShownPerReal = ulDReal ? double( ulDReal + ulDGen + ulDRepeat ) / double( ulDReal ) : 0.0;
+		const double flGenPerReal = ulDReal ? double( ulDGen ) / double( ulDReal ) : 0.0;
 		std::string sTrace;
 		{
 			std::scoped_lock lock( g_TraceMutex );
@@ -983,7 +994,8 @@ namespace kfg
 			"\"post\":\"%s\",\"post_active\":%s,\"post_error\":\"%s\",\"post_frames\":%" PRIu64 ",\"post_skipped\":%" PRIu64 ","
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
-			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u}\n",
+			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,"
+			"\"strict\":%d,\"shown_per_real\":%.2f,\"gen_per_real\":%.2f}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1001,7 +1013,11 @@ namespace kfg
 			s.flPostUsLast, s.ulPostSamples ? s.flPostUsSum / double( s.ulPostSamples ) : 0.0,
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs,
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
-			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight );
+			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight,
+			std::clamp( cv_kfg_strict.Get(), 0, 3 ), flShownPerReal, flGenPerReal );
+		s.ulPrevReal = q.n_real;
+		s.ulPrevGen = q.n_gen;
+		s.ulPrevRepeat = q.n_repeat;
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1019,7 +1035,10 @@ namespace kfg
 		const int nBase = cv_kfg_base_fps.Get();
 		if ( cv_kfg_multiplier.Get() == 0 || nBase <= 0 || nRefreshHz <= 0 )
 			return 0;
-		const int nMin = ( nRefreshHz + int( KFG_MAX_MULTIPLIER ) - 1 ) / int( KFG_MAX_MULTIPLIER );
+		// At most two generated frames per real one (kfg_sched.h KFG_MAX_GEN_PER_REAL): the
+		// base is at least refresh / 3.
+		const int nMaxN = int( KFG_MAX_GEN_PER_REAL ) + 1;
+		const int nMin = ( nRefreshHz + nMaxN - 1 ) / nMaxN;
 		return std::clamp( nBase, std::max( 20, nMin ), nRefreshHz );
 	}
 
@@ -1040,11 +1059,11 @@ namespace kfg
 		if ( const int nBase = BaseCapFPS( nHz ) )
 		{
 			// Longest source interval in vblanks: 40 at 90 Hz alternates 2 and 3, so 3. A cap
-			// at the refresh rate needs no generation.
-			return nBase >= nHz ? 1u : uint32_t( ( nHz + nBase - 1 ) / nBase );
+			// at the refresh rate needs no generation. Never above x3 (two generated frames).
+			return nBase >= nHz ? 1u : std::min( KFG_MAX_GEN_PER_REAL + 1u, uint32_t( ( nHz + nBase - 1 ) / nBase ) );
 		}
 		if ( n == 1 )
-			return g_State.bAutoInit ? g_State.autoc.mult : 3u;
+			return g_State.bAutoInit ? std::min( KFG_MAX_GEN_PER_REAL + 1u, g_State.autoc.mult ) : 3u;
 		return ( n == 2 || n == 3 ) ? uint32_t( n ) : 1u;
 	}
 
@@ -1142,6 +1161,7 @@ namespace kfg
 			s.uMultiplier = uMult;
 			kfg_log.infof( "multiplier %u", uMult );
 		}
+		kfg_sched_set_strict( &s.sched, uint32_t( std::clamp( cv_kfg_strict.Get(), 0, 3 ) ) );
 		if ( uMult == 1 && s.sched.state == KFG_STATE_OFF )
 		{
 			// Fully off: drop the ring so an idle feature costs no memory.

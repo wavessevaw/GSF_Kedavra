@@ -8,10 +8,9 @@
 // game actually delivers. The caps are steps of 5 fps from refresh / 3 (at least 30) up to
 // refresh / 2 (90 Hz: 30, 35, 40, 45, so x3, x2.6, x2.25, x2; 120 Hz: 40 to 60; 60 Hz, a TV:
 // 30, x2). By default generation never goes above x3: a game that cannot hold the lowest cap
-// stays capped there and the scheduler repeats frames. A controller may lower the floor
-// (kfg_auto_floor) to 24 fps or refresh / 4, whichever is higher (90 Hz: 24, x3.75, frames
-// held 3 or 4 refreshes, never 5; 60 Hz: 24, x2.5; 120 Hz: 30, x4); the floor is then the
-// lowest cap, below the usual steps.
+// stays capped there and the scheduler repeats frames. GSF 1.5: at most two generated frames
+// between two real ones, so a floor below refresh / 3 (kfg_auto_floor, the old x3.75) is
+// raised to it.
 //
 //   * it starts at the lowest cap, the cadence most games can hold;
 //   * after a 1 s window with no late source frame it tries the next cap up;
@@ -79,10 +78,12 @@ static inline void kfg_auto_set_level(kfg_auto *a, uint32_t level)
 // rounded up) and the game never runs below 24 fps. 90 Hz: 24 (x3.75), 60 Hz: 24 (x2.5),
 // 120 Hz: 30 (x4). Without a floor Auto stays at x3 at most; the plugin offers the 120 Hz x4
 // floor only as a hidden, not recommended option.
+// GSF 1.5: at most two generated frames between two real frames, so the floor is refresh / 3
+// rounded up (90 Hz: 30, x3; 60 Hz: 20; 120 Hz: 40) and Auto stays within x2 to x3.
 static inline uint32_t kfg_auto_min_floor(uint32_t refresh_hz)
 {
-	const uint32_t f = kfg_auto_div_up(refresh_hz, 4u);
-	return f < 24u ? 24u : f;
+	const uint32_t f = kfg_auto_div_up(refresh_hz, 3u);
+	return f < 20u ? 20u : f;
 }
 
 // floor_fps: lowest cap; 0 = refresh / 3 (x3). Clamped to [kfg_auto_min_floor, refresh / 3].
