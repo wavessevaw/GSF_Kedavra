@@ -1,4 +1,4 @@
-import {DialogButton, Focusable, PanelSection, PanelSectionRow, SliderField, ToggleField, gamepadDialogClasses, gamepadSliderClasses, staticClasses} from '@decky/ui';
+import {DialogButton, Focusable, PanelSection, PanelSectionRow, ToggleField, gamepadDialogClasses, gamepadSliderClasses, staticClasses} from '@decky/ui';
 import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
@@ -18,12 +18,13 @@ type Status = {
   auto?: boolean; auto_switches?: number; source_late?: number; cap_fps?: number; base_fps?: number;
   unsupported_format?: number; unsupported_colorspace?: number;
   auto_floor?: number; hdr_enabled?: boolean; transfer?: string; vrr_held?: boolean;
+  req_multiplier?: number; req_base_fps?: number;
 };
 
 // ×2, ×2.5, ×3.75 exactly (quarter steps, like the HUD), else one decimal (×2.6 for 35 at 90 Hz).
 const multText = (ratio: number) => Math.abs(ratio - Math.round(ratio)) < 0.05 ? `×${Math.round(ratio)}`
   : Math.abs(ratio * 4 - Math.round(ratio * 4)) < 0.01 ? `×${(Math.round(ratio * 4) / 4).toFixed(2).replace(/0$/, '')}` : `×${ratio.toFixed(1)}`;
-type Mode = 'off' | 'auto' | 'cap';
+type Mode = 'off' | 'x2' | 'auto';
 type View = 'main' | 'setup' | 'pace' | 'log';
 type Check = {key: string; ok: boolean; text: string; detail: string};
 type Diagnose = {checks: Check[]; ok: boolean};
@@ -31,9 +32,9 @@ type Bench = {ok: boolean; correct?: boolean; analysis_ms?: number; two_outputs_
 
 const rpc = {
   status: callable<[], Status>('get_status'),
-  settings: callable<[], {hud: boolean; base_fps: number; x375: boolean; hdr: boolean}>('get_settings'),
-  setOptions: callable<[boolean, boolean], {x375: boolean; hdr: boolean}>('set_options'),
-  setMode: callable<[Mode, number], {mode: Mode; base_fps: number}>('set_mode'),
+  settings: callable<[], {hud: boolean; hdr: boolean; mode: Mode}>('get_settings'),
+  setOptions: callable<[boolean], {hdr: boolean}>('set_options'),
+  setMode: callable<[Mode], {mode: Mode}>('set_mode'),
   setHud: callable<[boolean], {hud: boolean}>('set_hud'),
   start: callable<[string], Capture>('start_capture'),
   stop: callable<[], Report>('stop_capture'),
@@ -93,7 +94,6 @@ const secondary: CSSProperties = {...flat, background: '#0d1210', color: '#f2f6f
 const ICONS: Record<string, string> = {
   off: 'M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0',
   auto: 'M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z',
-  cap: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 4v6M10 14v6',
   pace: 'M3 12h4l2-6 4 12 2-6h6',
   setup: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1',
   log: 'M6 3h9l4 4v14H6zM9 11h7M9 15h7M9 7h3',
@@ -104,14 +104,15 @@ const Icon = ({name, size = 20}: {name: string; size?: number}) =>
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
     style={{display: 'block', flex: 'none'}}><path d={ICONS[name]}/></svg>;
 
-// A big tile with an icon, as in GFG Extreme: modes and the Pace / Setup / Log row.
-function Tile({selected, onClick, disabled, label, icon, dot}: {selected?: boolean; onClick: () => void; disabled?: boolean; label: string; icon: string; dot?: boolean}) {
+// A big tile with an icon, as in GFG Extreme: modes and the Pace / Setup / Log row. A tile
+// without an icon shows its label alone, larger (X2).
+function Tile({selected, onClick, disabled, label, icon, dot}: {selected?: boolean; onClick: () => void; disabled?: boolean; label: string; icon?: string; dot?: boolean}) {
   return <DialogButton onClick={onClick} disabled={disabled} className={'gsf-tile' + (selected ? ' gsf-on' : '')}
     style={{...flat, flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
       height: 66, padding: '8px 2px', borderRadius: 14, boxSizing: 'border-box', fontSize: 12, fontWeight: 700,
       background: selected ? 'linear-gradient(180deg, #74ec6a 0%, #45c83d 100%)' : CARD_BG, color: selected ? '#04120a' : C.text,
       border: `1px solid ${selected ? C.green : C.line}`, boxShadow: selected ? '0 0 16px rgba(82, 214, 74, 0.35)' : 'none'}}>
-    <Icon name={icon}/>{label}
+    {icon ? <><Icon name={icon}/>{label}</> : <span style={{fontSize: 15, fontWeight: 800}}>{label}</span>}
     {dot && <span style={{position: 'absolute', top: 8, right: 10, width: 7, height: 7, borderRadius: 4, background: C.red}}/>}
   </DialogButton>;
 }
@@ -141,9 +142,7 @@ function Content() {
   const [status, setStatus] = useState<Status>();
   const [view, setView] = useState<View>('main');
   const [hud, setHud] = useState(true);
-  const [x375, setX375] = useState(false);
   const [hdr, setHdr] = useState(true);
-  const [base, setBase] = useState(30);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [report, setReport] = useState<Report>();
@@ -153,9 +152,8 @@ function Content() {
   const [benchRes, setBenchRes] = useState<Bench>();
   const [showChecks, setShowChecks] = useState(false);
   const lock = useRef(false);
-  const baseTimer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setBase(r.base_fps); setX375(r.x375); setHdr(r.hdr);}).catch(() => {});}, []);
+  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setHdr(r.hdr);}).catch(() => {});}, []);
   const refreshDiag = async () => {try {setDiag(await rpc.diagnose());} catch (e) {setMessage(String(e));}};
   useEffect(() => {void refreshDiag();}, []);
   useEffect(() => {
@@ -184,7 +182,11 @@ function Content() {
   const running = status?.engine === 'running';
   const mult = status?.multiplier ?? 1;
   const generating = running && status?.state === 'active';
-  const mode: Mode = !running || (mult <= 1 && status?.state !== 'active') ? 'off' : status?.base_fps ? 'cap' : 'auto';
+  // The engine's requested mode: kfg_multiplier 1 is Auto, 2 is X2 (a Custom cap left by an
+  // older plugin is moved to X2 by the backend).
+  const req = status?.req_multiplier;
+  const mode: Mode = !running || (req !== undefined ? req === 0 : mult <= 1 && status?.state !== 'active') ? 'off'
+    : (req !== undefined ? req === 1 && !status?.req_base_fps : status?.auto) ? 'auto' : 'x2';
   const hz = status?.refresh_ns ? 1e9 / status.refresh_ns : 90;
   const live = status?.live;
   const pace = live?.pace;
@@ -193,32 +195,21 @@ function Content() {
   const ratio = gameFps ? hz / gameFps : mult;
   const installed = diag?.checks.some(c => c.key === 'installed' && c.ok);
   // Auto's caps (kfg_auto.h): refresh / 3 (at least 30), steps of 5, refresh / 2. 90 Hz: 30 / 35 /
-  // 40 / 45, and the low floor below them when allowed: 24 or refresh / 4 (90 Hz 24 at ×3.75,
-  // 120 Hz 30 at ×4, 60 Hz 24 at ×2.5).
+  // 40 / 45. X2 holds the game at refresh / 2.
   const hzR = Math.round(hz), capHi = Math.floor(hzR / 2), lo3 = Math.ceil(hzR / 3);
   const capLo = lo3 >= 30 ? lo3 : Math.min(30, capHi);
-  const capFloor = Math.max(24, Math.ceil(hzR / 4));
-  const floorMult = multText(hzR / capFloor), loMult = multText(hzR / capLo);
   const autoCaps = (() => {
     const lo = capLo, hi = capHi, c = [lo];
-    const floor = capFloor;
-    if (x375 && floor < lo) c.unshift(floor);
     for (let x = (Math.floor(lo / 5) + 1) * 5; x < hi; x += 5) c.push(x);
     if (hi > lo) c.push(hi);
     return c.join(' / ');
   })();
 
-  const setMode = (m: Mode, b = base) => void act(async () => {
-    await rpc.setMode(m, b);
-    return m === 'off' ? 'Generation off' : m === 'auto' ? `Auto: the game is held at the highest of ${autoCaps} it keeps steady, ${x375 && capFloor < capLo ? floorMult : loMult} at most`
-      : `Base FPS ${b}: the game is held at ${b}, generation fills up to ${Math.round(hz)}`;
+  const setMode = (m: Mode) => void act(async () => {
+    await rpc.setMode(m);
+    return m === 'off' ? 'Generation off' : m === 'auto' ? `Auto: the game is held at the highest of ${autoCaps} it keeps steady, x2 or x3, at most two generated frames`
+      : `X2: the game is held at ${capHi}, one generated frame after each`;
   });
-  const onBase = (v: number) => {
-    setBase(v);
-    // The slider fires on every step; apply once it settles.
-    window.clearTimeout(baseTimer.current);
-    if (mode === 'cap') baseTimer.current = window.setTimeout(() => setMode('cap', v), 500);
-  };
 
   // One short line under the hero card; empty when the card already says it all.
   let note = '';
@@ -227,8 +218,8 @@ function Content() {
   else if (status?.steam_ui) note = 'Steam is on screen: generation waits for the game.';
   else if (status?.state === 'degraded') note = 'Paused: frame analysis cannot keep up. Retrying in 2 s.';
   else if (status?.vrr_held) note = 'VRR is paused while generation is on: generated frames need a fixed refresh. Off gives VRR back.';
-  else if (mode === 'cap' && live?.real !== null && live?.real !== undefined && live.real < 0.95 * (status?.base_fps ?? 0))
-    note = `The game runs below its cap of ${status?.base_fps}. Lower the cap or use Auto for steadier motion.`;
+  else if (mode === 'x2' && live?.real !== null && live?.real !== undefined && live.real < 0.95 * (status?.cap_fps || capHi))
+    note = `The game runs below its cap of ${status?.cap_fps || capHi}. Use Auto for steadier motion.`;
   else if (mode === 'auto') note = (status?.cap_fps ?? 0) >= Math.floor(hz / 2) ? 'Holds the top cap; drops by itself if the game falls behind.'
     : 'Raises the cap by itself when the game has headroom.';
 
@@ -236,12 +227,9 @@ function Content() {
   const failed = diag?.checks.filter(c => !c.ok) ?? [];
   const gap: CSSProperties = {height: 6};
 
-  // Above 90 Hz (a TV) the low floor is x4: not recommended, so it lives in Setup, off by default.
-  const floorInSetup = hzR > 90;
-  const setOptions = (nx: boolean, nh: boolean) => void act(async () => {
-    const r = await rpc.setOptions(nx, nh); setX375(r.x375); setHdr(r.hdr);
-    return nx !== x375 ? (r.x375 ? `Auto may go down to base ${capFloor} (${floorMult}) when the game cannot hold ${capLo}` : `Auto stays at ${loMult} at most`)
-      : (r.hdr ? 'HDR games get generation too' : 'HDR games pass through without generation');
+  const setOptions = (nh: boolean) => void act(async () => {
+    const r = await rpc.setOptions(nh); setHdr(r.hdr);
+    return r.hdr ? 'HDR games get generation too' : 'HDR games pass through without generation';
   });
 
   if (view === 'setup') return <PanelSection>
@@ -271,14 +259,6 @@ function Content() {
     <PanelSectionRow><div style={{fontSize: 11, lineHeight: 1.45, color: C.label, padding: '0 2px'}}>
       Mounted over the stock Gamescope from /var/lib/kedavra; the SteamOS image is not changed. If Gaming Mode fails to start, the next boot uses the stock one.</div></PanelSectionRow>
     <div style={gap}/>
-    {floorInSetup && capFloor < capLo && <>
-      <PanelSectionRow><div style={caps}>ENGINE</div></PanelSectionRow>
-      <PanelSectionRow><div className="gsf-green" style={{...card, padding: `2px ${INSET}px`}}>
-        <ToggleField label={`Allow ${floorMult} in Auto`} description={`Not recommended: base ${capFloor} when the game cannot hold ${capLo}`} checked={x375}
-          disabled={busy || !running} bottomSeparator="none" onChange={v => setOptions(v, hdr)}/>
-      </div></PanelSectionRow>
-      <div style={gap}/>
-    </>}
     <PanelSectionRow><div style={caps}>TOOLS</div></PanelSectionRow>
     <PanelSectionRow><Focusable style={{display: 'flex', flexDirection: 'column', gap: 6}}>
       <ListButton title="Save report to Desktop" sub="One zip: diagnostics, pacing traces, benchmark" onClick={() => void act(async () => 'Report saved: ' + (await rpc.report()).path.replace(/^.*\/Desktop\//, 'Desktop/'))}/>
@@ -312,7 +292,7 @@ function Content() {
         return s ? `Trace: P95 ${s.p95_ms?.toFixed(3)} ms, P99 ${s.p99_ms?.toFixed(3)} ms, missed ${s.missed_pct?.toFixed(2)}% → ${s.pass ? 'PASS' : 'FAIL'}` : 'Trace saved, analysis failed';
       })} className="gsf-btn" style={{...primary, background: C.text}}>■  Stop recording · {status.capture.elapsed_s.toFixed(0)} s</DialogButton> :
       <DialogButton disabled={busy || !running} onClick={() => void act(async () => {
-        const label = mode === 'cap' ? `cap${status?.base_fps}` : `${status?.auto ? 'auto-' : ''}x${mult}`;
+        const label = `${mode === 'auto' ? 'auto-' : ''}x${mult}`;
         const c = await rpc.start(label); return 'Recording KMS flip trace: ' + (c?.path ?? '');
       })} className="gsf-btn" style={primary}>●  Record pacing trace</DialogButton>}
     </PanelSectionRow>
@@ -352,7 +332,7 @@ function Content() {
       <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0}}>
         <div style={caps}>GAME</div>
         <div style={{fontSize: 26, fontWeight: 800, lineHeight: 1}}>{fmt(live?.real)}{generating && <span style={{color: C.green, fontSize: 20, textShadow: `0 0 10px ${C.green}66`}}> {mult_text}</span>}</div>
-        <div style={{fontSize: 11, color: C.muted}}>{mode === 'cap' ? `Custom · cap ${status?.base_fps}` : mode === 'auto' ? `Auto · cap ${status?.cap_fps ?? '—'}` : running ? 'Generation off' : 'Engine not running'}</div>
+        <div style={{fontSize: 11, color: C.muted}}>{mode === 'x2' ? `X2 · cap ${status?.cap_fps || capHi}` : mode === 'auto' ? `Auto · cap ${status?.cap_fps ?? '—'}` : running ? 'Generation off' : 'Engine not running'}</div>
         <div style={{alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 12,
           background: C.ground, border: `1px solid ${C.line}`, color: badgeColor, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em'}}>
           <span style={{width: 7, height: 7, borderRadius: 4, background: badgeColor, boxShadow: `0 0 6px ${badgeColor}`}}/>{badge}</div>
@@ -374,16 +354,12 @@ function Content() {
     <div style={space}/>
     <PanelSectionRow><Focusable style={{display: 'flex', gap: 8}} flow-children="horizontal">
       <Tile selected={mode === 'off'} disabled={busy || !running} label="Off" icon="off" onClick={() => setMode('off')}/>
+      <Tile selected={mode === 'x2'} disabled={busy || !running} label="X2" onClick={() => setMode('x2')}/>
       <Tile selected={mode === 'auto'} disabled={busy || !running} label="Auto" icon="auto" onClick={() => setMode('auto')}/>
-      <Tile selected={mode === 'cap'} disabled={busy || !running} label={mode === 'cap' ? `Custom ${base}` : 'Custom'} icon="cap" onClick={() => setMode('cap')}/>
     </Focusable></PanelSectionRow>
     <div style={space}/>
     <PanelSectionRow><div className="gsf-green" style={{...card, padding: `2px ${INSET}px`}}>
-      {mode === 'cap' && <SliderField label="Base game FPS" value={Math.min(base, hzR)} min={20} max={hzR} step={1} showValue bottomSeparator="standard"
-        disabled={busy || !running} onChange={onBase}/>}
-      {mode === 'auto' && !floorInSetup && <ToggleField label={`Allow ${floorMult}`} description={`Base ${capFloor} when the game cannot hold ${capLo}`} checked={x375}
-        disabled={busy || !running} bottomSeparator="standard" onChange={v => setOptions(v, hdr)}/>}
-      <ToggleField label="HDR games" checked={hdr} disabled={busy || !running} bottomSeparator="standard" onChange={v => setOptions(x375, v)}/>
+      <ToggleField label="HDR games" checked={hdr} disabled={busy || !running} bottomSeparator="standard" onChange={v => setOptions(v)}/>
       <ToggleField label="In-game HUD" checked={hud} disabled={busy} bottomSeparator="none"
         onChange={v => void act(async () => {setHud((await rpc.setHud(v)).hud); return v ? 'HUD on' : 'HUD off';})}/>
     </div></PanelSectionRow>

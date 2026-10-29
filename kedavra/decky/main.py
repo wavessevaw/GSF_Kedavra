@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import decky
-from kedavra_ctl import Control
+from kedavra_ctl import Control, migrate_settings
 from kedavra_hud import Hud
 from kedavra_install import Installer, bench
 
@@ -25,13 +25,19 @@ class Plugin:
         self.health = loop.create_task(self._health())
         self.hud_task = loop.create_task(self._hud())
 
-    DEFAULTS = {"hud": True, "base_fps": 30, "x375": False, "hdr": True}
+    DEFAULTS = {"hud": True, "hdr": True, "mode": "off"}
 
     def _load_settings(self):
         try:
-            return {**self.DEFAULTS, **json.loads(self.settings_path.read_text())}
+            saved = json.loads(self.settings_path.read_text())
         except (OSError, ValueError):
             return dict(self.DEFAULTS)
+        # GSF 1.5: Custom ("cap") becomes X2; the Custom base and x3.75 are gone.
+        settings, changed = migrate_settings({**self.DEFAULTS, **saved})
+        if changed:
+            self.settings = settings
+            self._save_settings()
+        return settings
 
     def _save_settings(self):
         try:
@@ -52,6 +58,13 @@ class Plugin:
                     self.options_at = time.monotonic()
                     async with self.lock:
                         await asyncio.to_thread(self.ctl.apply_options, self.settings)
+                # An engine still in a Custom cap (set by an older plugin) or fixed x3: X2.
+                if self.ctl.legacy_mode(st) and time.monotonic() - self.options_at > 3:
+                    self.options_at = time.monotonic()
+                    async with self.lock:
+                        await asyncio.to_thread(self.ctl.set_mode, "x2")
+                        self.settings["mode"] = "x2"
+                        await asyncio.to_thread(self._save_settings)
             except Exception as e:
                 decky.logger.warning(f"hud: {e}")
             await asyncio.sleep(1)
@@ -87,32 +100,26 @@ class Plugin:
         return {"hud": self.settings["hud"]}
 
     async def get_settings(self):
-        return {"hud": bool(self.settings.get("hud")), "base_fps": int(self.settings.get("base_fps") or 30),
-                "x375": bool(self.settings.get("x375")), "hdr": bool(self.settings.get("hdr"))}
+        return {"hud": bool(self.settings.get("hud")), "hdr": bool(self.settings.get("hdr")), "mode": self.settings.get("mode", "off")}
 
-    async def set_options(self, x375: bool, hdr: bool):
-        """Engine options: Auto may go down to its low floor (x3.75 at 90 Hz, x4 at 120, x2.5 at 60); generate for HDR games."""
+    async def set_options(self, hdr: bool):
+        """Engine options: generate for HDR games."""
         async with self.lock:
-            self.settings["x375"] = bool(x375)
             self.settings["hdr"] = bool(hdr)
             await asyncio.to_thread(self._save_settings)
             self.options_at = time.monotonic()
             await asyncio.to_thread(self.ctl.apply_options, self.settings)
-            return {"x375": self.settings["x375"], "hdr": self.settings["hdr"]}
+            return {"hdr": self.settings["hdr"]}
 
-    async def set_mode(self, mode: str, base_fps: int = 0):
-        """off | auto | cap (the game is held at base_fps, generation fills the refresh)."""
-        if mode not in ("off", "auto", "cap"):
-            raise ValueError(f"unknown mode {mode}")
+    async def set_mode(self, mode: str):
+        """off | x2 (strict x2, the game capped at refresh / 2) | auto (x2 or x3, at most two generated frames)."""
+        if mode == "cap":
+            mode = "x2"  # a frontend from before GSF 1.5
         async with self.lock:
-            if mode == "cap":
-                self.settings["base_fps"] = int(base_fps)
-                await asyncio.to_thread(self._save_settings)
-                await asyncio.to_thread(self.ctl.set_base_fps, int(base_fps))
-            elif mode == "auto":
-                await asyncio.to_thread(self.ctl.set_base_fps, 0)
-            await asyncio.to_thread(self.ctl.set_multiplier, 0 if mode == "off" else 1)
-            return {"mode": mode, "base_fps": int(base_fps) if mode == "cap" else 0}
+            await asyncio.to_thread(self.ctl.set_mode, mode)
+            self.settings["mode"] = mode
+            await asyncio.to_thread(self._save_settings)
+            return {"mode": mode}
 
     async def get_status(self):
         st = await asyncio.to_thread(self.ctl.status)

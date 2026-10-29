@@ -117,21 +117,77 @@ class ControlTest(unittest.TestCase):
         self.assertLess(r["summary"]["p95_ms"], 0.01)
         self.assertIsNone(self.ctl.capture)
 
-    def test_options_x375_and_hdr(self):
+    def test_options_hdr_and_floor(self):
         status = self.ctl.runtime / "kedavra-status.json"
         status.write_text(json.dumps({"engine": "kedavra-gamescope", "req_auto_floor": 0, "hdr_enabled": True}))
-        self.assertFalse(self.ctl.options_differ(json.loads(status.read_text()), {"x375": False, "hdr": True}))
-        self.assertTrue(self.ctl.options_differ(json.loads(status.read_text()), {"x375": True, "hdr": True}))
-        self.ctl.apply_options({"x375": True, "hdr": False})
-        self.assertEqual(self.rec.calls[-2][-2:], ["kfg_auto_floor", "20"])
+        self.assertFalse(self.ctl.options_differ(json.loads(status.read_text()), {"hdr": True}))
+        self.assertTrue(self.ctl.options_differ(json.loads(status.read_text()), {"hdr": False}))
+        # A floor left by the old x3.75 option is put back to refresh / 3.
+        self.assertTrue(self.ctl.options_differ({"req_auto_floor": 20, "hdr_enabled": True}, {"hdr": True}))
+        self.ctl.apply_options({"hdr": False})
+        self.assertEqual(self.rec.calls[-2][-2:], ["kfg_auto_floor", "0"])
         self.assertEqual(self.rec.calls[-1][-2:], ["kfg_hdr", "0"])
 
     def test_options_refused_by_old_engine(self):
         (self.ctl.runtime / "kedavra-status.json").write_text(json.dumps({"engine": "kedavra-gamescope", "auto": True}))
-        self.assertFalse(self.ctl.options_differ({"auto": True}, {"x375": True, "hdr": True}))
+        self.assertFalse(self.ctl.options_differ({"auto": True}, {"hdr": True}))
         with self.assertRaises(RuntimeError):
-            self.ctl.apply_options({"x375": True, "hdr": True})
+            self.ctl.apply_options({"hdr": True})
 
+    def _engine(self, **kw):
+        st = {"engine": "kedavra-gamescope", "auto": False, "base_fps": 0, "req_auto_floor": 0, **kw}
+        (self.ctl.runtime / "kedavra-status.json").write_text(json.dumps(st))
+
+    def _convars(self):
+        return [c[-2:] for c in self.rec.calls]
+
+    def test_mode_x2_is_strict_x2_without_a_base(self):
+        self._engine(strict=1)
+        self.ctl.set_mode("x2")
+        self.assertEqual(self._convars(), [["kfg_base_fps", "0"], ["kfg_strict", "1"], ["kfg_multiplier", "2"]])
+
+    def test_mode_auto_is_x2_to_x3(self):
+        self._engine(strict=1)
+        self.ctl.set_mode("auto")
+        self.assertEqual(self._convars(), [["kfg_base_fps", "0"], ["kfg_strict", "1"], ["kfg_auto_floor", "0"], ["kfg_multiplier", "1"]])
+
+    def test_mode_without_strict_engine_and_off(self):
+        self._engine()
+        self.ctl.set_mode("x2")
+        self.assertNotIn(["kfg_strict", "1"], self._convars())
+        self.ctl.set_mode("off")
+        self.assertEqual(self._convars()[-1], ["kfg_multiplier", "0"])
+        for gone in ("cap", "x375", "x3"):
+            with self.assertRaises(ValueError):
+                self.ctl.set_mode(gone)
+
+    def test_legacy_engine_modes_move_to_x2(self):
+        legacy = kedavra_ctl.Control.legacy_mode
+        self.assertTrue(legacy({"fresh": True, "req_multiplier": 1, "req_base_fps": 40}))
+        self.assertTrue(legacy({"fresh": True, "req_multiplier": 3, "req_base_fps": 0}))
+        self.assertFalse(legacy({"fresh": True, "req_multiplier": 1, "req_base_fps": 0}))
+        self.assertFalse(legacy({"fresh": True, "req_multiplier": 2, "req_base_fps": 0}))
+        self.assertFalse(legacy({"fresh": True, "req_multiplier": 0, "req_base_fps": 40}))
+        self.assertFalse(legacy({"fresh": False, "req_multiplier": 1, "req_base_fps": 40}))
+        self.assertFalse(legacy({"fresh": True}))
+
+
+class MigrateTest(unittest.TestCase):
+    def test_custom_becomes_x2_and_old_options_go(self):
+        s, changed = kedavra_ctl.migrate_settings({"hud": True, "base_fps": 40, "x375": True, "hdr": False, "mode": "cap"})
+        self.assertTrue(changed)
+        self.assertEqual(s, {"hud": True, "hdr": False, "mode": "x2"})
+
+    def test_current_settings_unchanged(self):
+        for mode in ("off", "x2", "auto"):
+            s, changed = kedavra_ctl.migrate_settings({"hud": False, "hdr": True, "mode": mode})
+            self.assertFalse(changed)
+            self.assertEqual(s["mode"], mode)
+
+    def test_unknown_mode_is_off(self):
+        s, changed = kedavra_ctl.migrate_settings({"mode": "x375"})
+        self.assertTrue(changed)
+        self.assertEqual(s["mode"], "off")
 
 if __name__ == "__main__":
     unittest.main()

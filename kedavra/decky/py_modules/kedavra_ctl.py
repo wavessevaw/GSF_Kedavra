@@ -2,7 +2,7 @@
 """KEDAVRA control backend for the Decky plugin.
 
 The engine runs inside the patched Gamescope. This module only:
-  * sets Gamescope convars with gamescopectl (kfg_multiplier, kfg_base_fps, kfg_trace);
+  * sets Gamescope convars with gamescopectl (kfg_multiplier, kfg_base_fps, kfg_strict, kfg_trace);
   * reads the status file the engine rewrites every second, and reports the
     engine as running only while that file is fresh (never from settings alone);
   * starts and stops KMS-flip trace captures and analyses them with kfg_pacing.
@@ -18,6 +18,28 @@ from pathlib import Path
 from kedavra_install import clean_env
 
 STATUS_STALE_S = 3.0
+
+# Panel modes (GSF 1.5): Off, X2 (strict x2, the game capped at refresh / 2) and Auto (the
+# engine picks x2 or x3, at most two generated frames between two real ones).
+MODES = ("off", "x2", "auto")
+
+
+def migrate_settings(settings):
+    """Settings saved by an older plugin: the Custom mode ("cap") becomes X2, and the Custom base
+    and the x3.75 option are gone. Returns (settings, changed)."""
+    out = dict(settings)
+    changed = False
+    if out.get("mode") == "cap":
+        out["mode"] = "x2"
+        changed = True
+    if out.get("mode") not in MODES:
+        changed = changed or "mode" in out
+        out["mode"] = "off"
+    for key in ("x375", "base_fps"):
+        if key in out:
+            del out[key]
+            changed = True
+    return out, changed
 
 
 class Control:
@@ -95,25 +117,45 @@ class Control:
         self._ctl("kfg_base_fps", fps)
         return {"base_fps": fps}
 
-    # The lowest floor Auto may use; the engine raises it to 24 or refresh / 4 (90 Hz: 24, x3.75;
-    # 120 Hz: 30, x4; 60 Hz: 24, x2.5).
-    X375_FLOOR = 20
+    def set_mode(self, mode):
+        """off | x2 (strict x2: the game is capped at refresh / 2) | auto (x2 or x3, the engine picks)."""
+        if mode not in MODES:
+            raise ValueError(f"unknown mode {mode}")
+        if mode == "off":
+            return self.set_multiplier(0)
+        st = self.status()
+        self.set_base_fps(0)
+        if "strict" in st:
+            # An engine with strict multipliers (GSF 1.5): xN is exactly N-1 generated frames.
+            self._ctl("kfg_strict", 1)
+        if mode == "auto":
+            self._ctl("kfg_auto_floor", 0)  # refresh / 3: x3 at the most
+        return self.set_multiplier(2 if mode == "x2" else 1)
+
+    @staticmethod
+    def legacy_mode(st):
+        """A running engine left in a mode the panel no longer has: a Custom base cap (from an
+        older plugin) or x3 at a fixed multiplier. The panel moves it to X2."""
+        if not st.get("fresh") or "req_multiplier" not in st:
+            return False
+        req = st.get("req_multiplier")
+        return req not in (0, 1, 2) or (req != 0 and (st.get("req_base_fps") or 0) > 0)
 
     def options_differ(self, st, settings):
         """True when a running engine's options are not the plugin's (it restarted with defaults)."""
         if "req_auto_floor" not in st:
             return False  # engine without these options
-        want_floor = self.X375_FLOOR if settings.get("x375") else 0
-        return st.get("req_auto_floor") != want_floor or bool(st.get("hdr_enabled")) != bool(settings.get("hdr"))
+        return st.get("req_auto_floor") != 0 or bool(st.get("hdr_enabled")) != bool(settings.get("hdr"))
 
     def apply_options(self, settings):
         st = self.status()
         if st.get("fresh") and "req_auto_floor" not in st:
-            raise RuntimeError("The installed Gamescope KEDAVRA is older than the plugin and has no x3.75 or HDR: "
+            raise RuntimeError("The installed Gamescope KEDAVRA is older than the plugin and has no HDR option: "
                                "press Reinstall Gamescope KEDAVRA and reboot.")
-        self._ctl("kfg_auto_floor", self.X375_FLOOR if settings.get("x375") else 0)
+        # Auto's floor is refresh / 3 (x3 at the most); the x3.75 option is gone.
+        self._ctl("kfg_auto_floor", 0)
         self._ctl("kfg_hdr", 1 if settings.get("hdr") else 0)
-        return {"x375": bool(settings.get("x375")), "hdr": bool(settings.get("hdr"))}
+        return {"hdr": bool(settings.get("hdr"))}
 
     # ------------------------------------------------------------ capture
 
