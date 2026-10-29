@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -58,6 +58,9 @@ static const scene SCENES[] = {
 	// from the stairs to unrelated texture.
 	{ "cut_to_flat", S_CUT_FLAT, 0, 0, false, true },
 	{ "cut_stairs", S_CUT_STAIRS, 0, 0, false, true },
+	// A fast turn over a dim, low-contrast surface with per-frame grain (TAA noise, film grain):
+	// where the motion search has little to hold on to and block artifacts showed on the Deck.
+	{ "grain_turn", S_GRAIN, 38, 7, true, false },
 };
 
 // Low base frame rate (--lowbase): every source interval is 1.25 times longer, so all
@@ -248,6 +251,16 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 			rgb[k] = rgb[k] * (1.0 - c) + 0.95 * c;
 		return;
 	}
+	case S_GRAIN: {
+		background(x - s->vx * t, y - s->vy * t, 23, rgb);
+		// Per-frame grain: a new pattern at every source time (t = 0, 1; generated phases get
+		// the truth of their own time, which no interpolation can reproduce: it only adds a
+		// floor to the error, the same for every method).
+		const double g = (hash2((int)x, (int)y, 1000 + (int)lrint(t * 64.0)) - 0.5) * 0.05;
+		for (int k = 0; k < 3; k++)
+			rgb[k] = 0.25 + 0.3 * (rgb[k] - 0.5) + g;
+		return;
+	}
 	case S_CUT_FLAT:
 		if (t < 0.5)
 			background(x, y, 1, rgb);
@@ -365,6 +378,51 @@ static double mean_abs(const uint8_t *a, const uint8_t *b, int w, int h, int x0,
 
 // Temporal error: how much the change from the previous output to this one differs from the
 // true change, per pixel and channel (flicker and shimmer show up here, a static blur does not).
+// Blockiness (GSF 1.5). errgrad: mean |gradient| of the luma error G - T (8-bit units): steps
+// in the error (a block's vector next to another's, a seam) score, a smooth error does not.
+// blk: how much more of G's gradient sits on one column (row) phase of the 4-pixel block grid
+// than the truth's (max over the 4 phases / mean, G minus T, x and y averaged; 0 = no grid).
+// The grid moves with the motion at a phase, which is why every phase offset is tried.
+typedef struct { double errgrad, blk; } blockiness;
+static blockiness g_blk, g_blk_cam;
+static int g_blk_n, g_blk_cam_n;
+static double luma8(const uint8_t *a, size_t i) { return 0.25 * a[i] + 0.5 * a[i + 1] + 0.25 * a[i + 2]; }
+static blockiness block_metric(const uint8_t *g, const uint8_t *t, int w, int h)
+{
+	blockiness r = { 0, 0 };
+	double eg = 0, n = 0, gx[2][4] = {{0}}, gy[2][4] = {{0}}, nx[4] = {0}, ny[4] = {0};
+	const int m = 8;  // borders out
+	for (int y = m; y < h - m; y++)
+		for (int x = m; x < w - m; x++) {
+			const size_t i = ((size_t)y * w + x) * 4, ix = i + 4, iy = i + (size_t)w * 4;
+			const double e = luma8(g, i) - luma8(t, i);
+			eg += fabs(luma8(g, ix) - luma8(t, ix) - e) + fabs(luma8(g, iy) - luma8(t, iy) - e);
+			n++;
+			gx[0][x & 3] += fabs(luma8(g, ix) - luma8(g, i));
+			gx[1][x & 3] += fabs(luma8(t, ix) - luma8(t, i));
+			gy[0][y & 3] += fabs(luma8(g, iy) - luma8(g, i));
+			gy[1][y & 3] += fabs(luma8(t, iy) - luma8(t, i));
+			nx[x & 3]++;
+			ny[y & 3]++;
+		}
+	r.errgrad = eg / n;
+	double ratio[2][2];
+	for (int k = 0; k < 2; k++) {
+		double mx = 0, sx = 0, my = 0, sy = 0;
+		for (int c = 0; c < 4; c++) {
+			const double vx = gx[k][c] / nx[c], vy = gy[k][c] / ny[c];
+			mx = vx > mx ? vx : mx;
+			my = vy > my ? vy : my;
+			sx += vx / 4;
+			sy += vy / 4;
+		}
+		ratio[k][0] = sx > 0 ? mx / sx : 1;
+		ratio[k][1] = sy > 0 ? my / sy : 1;
+	}
+	r.blk = 0.5 * ((ratio[0][0] - ratio[1][0]) + (ratio[0][1] - ratio[1][1]));
+	return r;
+}
+
 static double temporal_err(const uint8_t *o, const uint8_t *op, const uint8_t *t, const uint8_t *tp, int w, int h)
 {
 	double sum = 0;
@@ -885,11 +943,17 @@ int main(int argc, char **argv)
 			const bool known = s->kind == S_CLIMB;
 			if (!ok && !known)
 				failures++;
-			printf("  t=%.3f gen=%.2fdB blend=%.2fdB dup=%.2fdB region gen/blend/dup=%.2f/%.2f/%.2f |G-A|=%.2f |G-B|=%.2f hud=%.2f %s%s\n",
-			       t, pg, pl, pd, og, ol, od, ma, mb, hud_err, ok ? "PASS" : known ? "OPEN (not gated): " : "FAIL: ", why);
+			const blockiness bm = block_metric(G, T, w, h);
+			if (s->dynamic) {
+				g_blk.errgrad += bm.errgrad;
+				g_blk.blk += bm.blk;
+				g_blk_n++;
+			}
+			printf("  t=%.3f gen=%.2fdB blend=%.2fdB dup=%.2fdB region gen/blend/dup=%.2f/%.2f/%.2f |G-A|=%.2f |G-B|=%.2f hud=%.2f errgrad=%.3f blk=%.4f %s%s\n",
+			       t, pg, pl, pd, og, ol, od, ma, mb, hud_err, bm.errgrad, bm.blk, ok ? "PASS" : known ? "OPEN (not gated): " : "FAIL: ", why);
 			if (js)
-				fprintf(js, "   {\"t\": %.6f, \"psnr_gen\": %.3f, \"psnr_blend\": %.3f, \"psnr_dup\": %.3f, \"region_gen\": %.3f, \"region_blend\": %.3f, \"region_dup\": %.3f, \"mean_abs_vs_A\": %.3f, \"mean_abs_vs_B\": %.3f, \"hud_err\": %.3f, \"pass\": %s}%s\n",
-					t, pg, pl, pd, og, ol, od, ma, mb, hud_err, ok ? "true" : "false", pi < 2 ? "," : "");
+				fprintf(js, "   {\"t\": %.6f, \"psnr_gen\": %.3f, \"psnr_blend\": %.3f, \"psnr_dup\": %.3f, \"region_gen\": %.3f, \"region_blend\": %.3f, \"region_dup\": %.3f, \"mean_abs_vs_A\": %.3f, \"mean_abs_vs_B\": %.3f, \"hud_err\": %.3f, \"errgrad\": %.4f, \"blk\": %.5f, \"pass\": %s}%s\n",
+					t, pg, pl, pd, og, ol, od, ma, mb, hud_err, bm.errgrad, bm.blk, ok ? "true" : "false", pi < 2 ? "," : "");
 			char name[128];
 			snprintf(name, sizeof(name), "%s_t%03d_gen", s->name, (int)lrint(t * 1000));
 			write_ppm(out_dir, name, G, w, h);
@@ -909,6 +973,11 @@ int main(int argc, char **argv)
 	}
 	if (js)
 		fprintf(js, " ],\n");
+	if (g_blk_n) {
+		printf("blockiness (moving scenes): errgrad %.3f, blk %.4f over %d outputs\n", g_blk.errgrad / g_blk_n, g_blk.blk / g_blk_n, g_blk_n);
+		if (js)
+			fprintf(js, " \"blockiness\": {\"errgrad\": %.4f, \"blk\": %.5f, \"outputs\": %d},\n", g_blk.errgrad / g_blk_n, g_blk.blk / g_blk_n, g_blk_n);
+	}
 
 	// Running sequence through the ring: 8 frames of the objects scene, x3 outputs per pair.
 	if (!only) {
@@ -1018,6 +1087,10 @@ int main(int argc, char **argv)
 						worst = pg;
 					if (getenv("KFG_VERBOSE"))
 						printf("  camera f%02d v=%.1f t=%d/3 gen %.2f dB\n", f, CAM_VX[f - 1], j, pg);
+					const blockiness bm = block_metric(O, T, w, h);
+					g_blk_cam.errgrad += bm.errgrad;
+					g_blk_cam.blk += bm.blk;
+					g_blk_cam_n++;
 					double he = mean_abs(O, T, w, h, 40, 30, 360, 70);
 					if (he > hud_max)
 						hud_max = he;
@@ -1037,11 +1110,13 @@ int main(int argc, char **argv)
 				have_prev = true;
 			}
 		}
-		printf("camera: psnr gen %.2f dB (worst %.2f), dup %.2f dB; temporal gen %.3f, dup %.3f; cuts %d of %d; hud max %.2f\n",
-		       ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, CAM_FRAMES, hud_max);
+		printf("camera: psnr gen %.2f dB (worst %.2f), dup %.2f dB; temporal gen %.3f, dup %.3f; cuts %d of %d; hud max %.2f; errgrad %.3f blk %.4f\n",
+		       ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, CAM_FRAMES, hud_max,
+		       g_blk_cam_n ? g_blk_cam.errgrad / g_blk_cam_n : 0.0, g_blk_cam_n ? g_blk_cam.blk / g_blk_cam_n : 0.0);
 		if (js)
-			fprintf(js, " \"camera\": {\"psnr_gen\": %.3f, \"psnr_worst\": %.3f, \"psnr_dup\": %.3f, \"temporal_gen\": %.4f, \"temporal_dup\": %.4f, \"cuts\": %d, \"hud_max\": %.3f},\n",
-				ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, hud_max);
+			fprintf(js, " \"camera\": {\"psnr_gen\": %.3f, \"psnr_worst\": %.3f, \"psnr_dup\": %.3f, \"temporal_gen\": %.4f, \"temporal_dup\": %.4f, \"cuts\": %d, \"hud_max\": %.3f, \"errgrad\": %.4f, \"blk\": %.5f},\n",
+				ps_gen / n_ps, worst, ps_dup / n_ps, te_gen / n_te, te_dup / n_te, cuts, hud_max,
+				g_blk_cam_n ? g_blk_cam.errgrad / g_blk_cam_n : 0.0, g_blk_cam_n ? g_blk_cam.blk / g_blk_cam_n : 0.0);
 		free(O); free(Op); free(Tp); free(Dp);
 	}
 
