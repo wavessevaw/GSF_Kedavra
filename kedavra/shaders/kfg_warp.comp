@@ -97,6 +97,15 @@ float pair_error(vec2 pa, vec2 pb, ivec2 size)
 	return 0.2 * e;
 }
 
+// The same over three taps along one axis (centre and +-d).
+float line_error(vec2 pa, vec2 pb, vec2 d, ivec2 size)
+{
+	float e = 0.0;
+	for (int i = -1; i <= 1; i++)
+		e += dot(abs(kfg_tap(0, pa + float(i) * d, size).rgb - kfg_tap(1, pb + float(i) * d, size).rgb), vec3(1.0));
+	return e * (1.0 / 3.0);
+}
+
 // Where the content at output pixel p (phase u_t) is in A and in B under the camera map:
 // p = F^t(a) and b = F(a). Positions in source pixels. False without a usable map.
 bool camera_path(ivec2 p, vec2 sc, out vec2 pa, out vec2 pb)
@@ -157,6 +166,8 @@ void main()
 	vec4 s01 = texelFetch(s_samplers[2], clamp(b0 + ivec2(0, 1), ivec2(0), bsize - 1), 0);
 	vec4 s11 = texelFetch(s_samplers[2], clamp(b0 + ivec2(1, 1), ivec2(0), bsize - 1), 0);
 	vec4 sel;
+	// A still block next to this pixel (HUD, static world), for the static test below.
+	const bool still_near = s00.xy == vec2(0.0) || s10.xy == vec2(0.0) || s01.xy == vec2(0.0) || s11.xy == vec2(0.0);
 	// Only a threshold is needed: avoid three square roots per output pixel.
 	vec2 d10 = s00.xy - s10.xy, d01 = s00.xy - s01.xy, d11 = s00.xy - s11.xy;
 	float spread2 = max(max(dot(d10, d10), dot(d01, d01)), dot(d11, d11));
@@ -217,6 +228,25 @@ void main()
 				pa = ga;
 				pb = gb;
 				v = gb - ga;
+				sel.w = min(sel.w, 0.05);
+			}
+		}
+	}
+	// Static content against a moving neighbour (GSF 1.5): a HUD's edge rows share their 4x4
+	// blocks with the world moving behind it and took its vector (thin lines at 12 px/frame
+	// dragged the text rows). Where the pixel and its cross are the same in both frames and
+	// the vector explains them clearly worse, the pixel stays where it is. Two reads gate it.
+	if (pair && v != vec2(0.0) && still_near && spread2 >= 4.0) {
+		vec3 a0 = texelFetch(s_samplers[0], p, 0).rgb, b0 = texelFetch(s_samplers[1], p, 0).rgb;
+		if (dot(abs(a0 - b0), vec3(1.0)) < 0.03) {
+			// Along each axis on its own: at a HUD's top row the vertical arm reaches the world.
+			float ezh = line_error(vec2(p), vec2(p), vec2(2.0, 0.0), size), ezv = line_error(vec2(p), vec2(p), vec2(0.0, 2.0), size);
+			float esh = line_error(pa, pb, vec2(2.0, 0.0), size), esv = line_error(pa, pb, vec2(0.0, 2.0), size);
+			// A tie goes to staying put: glyphs repeat, and the moved position often matches too.
+			if ((ezh < 0.015 && ezh <= esh) || (ezv < 0.015 && ezv <= esv)) {
+				pa = vec2(p);
+				pb = vec2(p);
+				v = vec2(0.0);
 				sel.w = min(sel.w, 0.05);
 			}
 		}

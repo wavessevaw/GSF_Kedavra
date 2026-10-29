@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN, S_ROTATE, S_LINES };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -50,6 +50,10 @@ static const scene SCENES[] = {
 	// a top-down turn) and one-pixel lines (wires, fences, UI rules) panning under a HUD.
 	{ "rotation", S_ROTATE, 0, 0, true, false },
 	{ "thin_lines", S_LINES, 9, 3, true, false },
+	// Cuts the field-coherence test must still catch: to a flat dark picture (loading) and
+	// from the stairs to unrelated texture.
+	{ "cut_to_flat", S_CUT_FLAT, 0, 0, false, true },
+	{ "cut_stairs", S_CUT_STAIRS, 0, 0, false, true },
 };
 
 // Low base frame rate (--lowbase): every source interval is 1.25 times longer, so all
@@ -305,6 +309,18 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 	case S_CUT:
 		background(x, y, t < 0.5 ? 1 : 50, rgb);
 		return;
+	case S_CUT_FLAT:
+		if (t < 0.5)
+			background(x, y, 1, rgb);
+		else
+			rgb[0] = rgb[1] = rgb[2] = 0.06;
+		return;
+	case S_CUT_STAIRS:
+		if (t < 0.5)
+			stairs(x, y, rgb);
+		else
+			background(x, y, 31, rgb);
+		return;
 	case S_PAN:
 	case S_FASTPAN:
 		background(x - s->vx * t, y - s->vy * t, 1, rgb);
@@ -339,6 +355,36 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 	}
 }
 
+
+
+// Tuning aid (KFG_IDEAL): resample a frame at a fractional position with a separable kernel
+// (0 bilinear, 1 Catmull-Rom, 2 Lanczos-2), clamped at the borders.
+static double kern(int k, double x)
+{
+	x = fabs(x);
+	if (k == 0) return x < 1 ? 1 - x : 0;
+	if (k == 1) return x < 1 ? 1.5 * x * x * x - 2.5 * x * x + 1 : x < 2 ? -0.5 * x * x * x + 2.5 * x * x - 4 * x + 2 : 0;
+	if (x < 1e-9) return 1;
+	if (x >= 2) return 0;
+	const double px = 3.14159265358979 * x;
+	return 2 * sin(px) * sin(px / 2) / (px * px);
+}
+static double sample_k(const uint8_t *img, int w, int h, double x, double y, int c, int k)
+{
+	const int x0 = (int)floor(x), y0 = (int)floor(y);
+	double s = 0, ws = 0;
+	for (int j = -1; j <= 2; j++)
+		for (int i = -1; i <= 2; i++) {
+			const double wv = kern(k, x - (x0 + i)) * kern(k, y - (y0 + j));
+			if (wv == 0) continue;
+			int xx = x0 + i, yy = y0 + j;
+			xx = xx < 0 ? 0 : xx >= w ? w - 1 : xx;
+			yy = yy < 0 ? 0 : yy >= h ? h - 1 : yy;
+			s += wv * img[4 * ((size_t)yy * w + xx) + c];
+			ws += wv;
+		}
+	return s / ws;
+}
 
 static void render(const scene *s, double t, int w, int h, uint8_t *out)
 {
@@ -984,6 +1030,23 @@ int main(int argc, char **argv)
 				D[i] = t < 0.5 ? A[i] : B[i];
 			}
 			double pg = psnr_region(G, T, w, h, 0, 0, w, h);
+			if (getenv("KFG_IDEAL") && (s->kind == S_PAN || s->kind == S_FASTPAN || s->kind == S_LINES)) {
+				// The exact motion, resampled with each kernel: the ceiling of the warp.
+				uint8_t *I = malloc(nbytes);
+				for (int k = 0; k < 3; k++) {
+					for (int y = 0; y < h; y++)
+						for (int x = 0; x < w; x++)
+							for (int c = 0; c < 4; c++) {
+								const double a = sample_k(A, w, h, x - t * s->vx, y - t * s->vy, c, k);
+								const double b = sample_k(B, w, h, x + (1 - t) * s->vx, y + (1 - t) * s->vy, c, k);
+								double v = (1 - t) * a + t * b;
+								I[4 * ((size_t)y * w + x) + c] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : lrint(v));
+							}
+					printf("  ideal kernel %d t=%.3f: interior %.2f dB (gen %.2f dB)\n", k, t, psnr_region(I, T, w, h, 100, 90, w - 100, h - 70),
+					       psnr_region(G, T, w, h, 100, 90, w - 100, h - 70));
+				}
+				free(I);
+			}
 			double pl = psnr_region(L, T, w, h, 0, 0, w, h);
 			double pd = psnr_region(D, T, w, h, 0, 0, w, h);
 			double ma = mean_abs(G, A, w, h, 0, 0, w, h), mb = mean_abs(G, B, w, h, 0, 0, w, h);

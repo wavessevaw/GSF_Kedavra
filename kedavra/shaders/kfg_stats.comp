@@ -14,6 +14,7 @@ layout(local_size_x = 256) in;
 shared float s_bad[256];
 shared float s_mc[256];
 shared float s_zero[256];
+shared float s_inc[256];
 
 // The camera fit reads every block of its field, or every n-th in both directions (u_radius:
 // the field of level 2 is refitted on a quarter of its blocks).
@@ -397,13 +398,25 @@ void main()
 		return;
 	}
 	ivec2 size = u_srcSize;
-	float bad = 0.0, mc = 0.0, zero = 0.0, n = 0.0;
+	float bad = 0.0, mc = 0.0, zero = 0.0, inc = 0.0, n = 0.0;
 	for (int i = int(lid); i < size.x * size.y; i += 256) {
 		ivec2 q = ivec2(i % size.x, i / size.x);
 		vec2 f = texelFetch(s_samplers[2], q, 0).xy * 0.25; // pixels -> level-2 texels
 		float a = texelFetch(s_samplers[0], q, 0).r;
-		float e_mc = abs(a - kfg_tap(1, vec2(q) + f, size).r);
+		// The level-2 field is quantised to 2-4 pixels: a slow pan of 3 px/frame reads as 4, and
+		// the 1 px left over looked like a cut (GSF 1.5). Take the best of the vector and the
+		// vector one pixel (a quarter texel) off in each direction.
+		float e_mc = 1e9;
+		for (int dy = -1; dy <= 1; dy++)
+			for (int dx = -1; dx <= 1; dx++)
+				e_mc = min(e_mc, abs(a - kfg_tap(1, vec2(q) + f + 0.25 * vec2(dx, dy), size).r));
 		float e_zero = abs(a - texelFetch(s_samplers[1], q, 0).r);
+		// Field coherence: a block whose vector differs from its right or lower neighbour's
+		// by more than one texel (4 px). Motion is smooth almost everywhere; between two
+		// unrelated pictures the search returns scattered best matches.
+		vec2 f1 = texelFetch(s_samplers[2], min(q + ivec2(1, 0), size - 1), 0).xy * 0.25;
+		vec2 f2 = texelFetch(s_samplers[2], min(q + ivec2(0, 1), size - 1), 0).xy * 0.25;
+		inc += (length(f1 - f) > 1.0 || length(f2 - f) > 1.0) ? 1.0 : 0.0;
 		mc += e_mc;
 		zero += e_zero;
 		bad += e_mc > 0.1 ? 1.0 : 0.0;
@@ -412,12 +425,14 @@ void main()
 	s_bad[lid] = bad;
 	s_mc[lid] = mc;
 	s_zero[lid] = zero;
+	s_inc[lid] = inc;
 	barrier();
 	for (uint s = 128u; s > 0u; s >>= 1) {
 		if (lid < s) {
 			s_bad[lid] += s_bad[lid + s];
 			s_mc[lid] += s_mc[lid + s];
 			s_zero[lid] += s_zero[lid + s];
+			s_inc[lid] += s_inc[lid + s];
 		}
 		barrier();
 	}
@@ -426,8 +441,13 @@ void main()
 		float frac_bad = s_bad[0] / total;
 		float mean_mc = s_mc[0] / total, mean_zero = s_zero[0] / total;
 		// A cut is a pair that motion does not explain: many blocks stay badly matched, or
-		// the best motion removes little of the frame difference.
-		bool unexplained = mean_mc > 0.015 && mean_mc > 0.26 * mean_zero;
+		// the best motion removes little of the frame difference. GSF 1.5: "little" alone
+		// also matched slow pans (2-3 px/frame: small frame difference, interpolation
+		// residual). A residual over the noise floor now needs a scattered field (pans and
+		// turns: up to 25 % of blocks off their neighbours; a cut between two textures: 63 %),
+		// or to be most of the frame difference (a cut to or from a flat picture).
+		float incoherent = s_inc[0] / total;
+		bool unexplained = mean_mc > 0.012 && (incoherent > 0.4 || mean_mc > 0.6 * mean_zero);
 		float cut = (frac_bad > u_cutThreshold || unexplained) ? 1.0 : 0.0;
 		imageStore(dst, ivec2(0, 0), vec4(cut, frac_bad, s_mc[0] / total, s_zero[0] / total));
 	}
