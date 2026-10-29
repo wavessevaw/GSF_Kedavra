@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN, S_HTURN, S_HPAR, S_HLINES, S_HTURN_DARK };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -166,9 +166,177 @@ static void camera_pos(double t, double *cx, double *cy)
 	*cy = y * g_timescale;
 }
 
+// A centred crosshair (a static overlay over the moving world): arms 2 px wide from 5 to 17 px
+// off the centre and a 2x2 dot, white with a one-pixel dark outline.
+static bool crosshair(double x, double y, int w, int h, double rgb[3])
+{
+	const double dx = x - 0.5 * w, dy = y - 0.5 * h, ax = fabs(dx), ay = fabs(dy);
+	const bool core = (ax < 1 && ay < 1) || (ay < 1 && ax >= 5 && ax < 17) || (ax < 1 && ay >= 5 && ay < 17);
+	const bool edge = (ax < 2 && ay < 2) || (ay < 2 && ax >= 4 && ax < 18) || (ax < 2 && ay >= 4 && ay < 18);
+	if (!edge)
+		return false;
+	rgb[0] = rgb[1] = rgb[2] = core ? 0.95 : 0.08;
+	return true;
+}
+
+// ---- harder scenes (--hard, GSF 1.5) ---------------------------------------------------------
+// What the Deck shows on fast turns and the earlier scenes did not reproduce: blocks inside the
+// frame. A walk with a turn through a 3D yard (perspective ground of tiles with thin grout
+// lines, textured pillars at several depths in front of a far panorama: parallax, occlusion,
+// a flow that varies across the frame), a layered parallax pan with fine foliage-like detail
+// and a thin fence, and thin straight lines (1-2 px grids, a diagonal edge, a crosshair) under
+// slow and fast pans. Texture contrast fades with distance as mipmapping would, so the truth
+// itself does not alias.
+#define H_F 640.0      // focal length (px): a turn of w rad per frame moves the centre by H_F * w
+#define H_CX 640.0
+#define H_CY 380.0     // horizon
+#define H_CAM 1.6      // eye height (world units)
+static const double H_PILLAR[][2] = {
+	{ -2.5, 4.0 }, { 1.8, 5.5 }, { -0.6, 8.0 }, { 3.6, 9.0 }, { -4.2, 11.0 }, { 0.9, 13.5 },
+	{ 5.5, 6.0 }, { -6.0, 7.5 }, { 7.0, 12.0 }, { -2.0, 16.0 }, { 4.0, 17.5 }, { 8.5, 3.5 },
+	{ -8.0, 4.5 }, { 10.0, 9.5 }, { -10.5, 13.0 }, { 2.6, 2.2 },
+};
+#define H_NPILLAR ((int)(sizeof(H_PILLAR) / sizeof(H_PILLAR[0])))
+
+// Share of [u - fp/2, u + fp/2] covered by the periodic band [kP, kP + wl): box-filtered
+// coverage of thin lines over a sample's footprint fp (the scenes take 2x2 samples per pixel,
+// fp = 0.5 px), so a line at a sub-pixel position is a partial pixel and moves smoothly.
+static double pband_int(double x, double P, double wl)
+{
+	const double k = floor(x / P), r = x - k * P;
+	return k * wl + (r < wl ? r : wl);
+}
+static double pcov(double u, double P, double wl, double fp)
+{
+	if (fp < 1e-6)
+		fp = 1e-6;
+	return (pband_int(u + 0.5 * fp, P, wl) - pband_int(u - 0.5 * fp, P, wl)) / fp;
+}
+
+static void hturn(const scene *s, double t, double x, double y, double rgb[3])
+{
+	// vx: turn speed at the centre (px per source frame), vy: walking speed (units per frame).
+	const double yaw = s->vx / H_F * t, cz = s->vy * t;
+	const double dxc = (x - H_CX) / H_F, dyc = -(y - H_CY) / H_F;
+	const double c = cos(yaw), sn = sin(yaw);
+	const double dx = dxc * c + sn, dz = -dxc * sn + c;  // world direction (horizontal), dy = dyc
+	// Nearest pillar along the ray (circles of radius 0.4, 3.2 high).
+	double best = 1e9, bu = 0;
+	for (int i = 0; i < H_NPILLAR; i++) {
+		const double px = H_PILLAR[i][0], pz = H_PILLAR[i][1] - cz;
+		const double a = dx * dx + dz * dz, b = -2.0 * (dx * px + dz * pz), cc = px * px + pz * pz - 0.16;
+		const double disc = b * b - 4 * a * cc;
+		if (disc < 0)
+			continue;
+		const double sh = (-b - sqrt(disc)) / (2 * a);
+		if (sh <= 0.05 || sh >= best)
+			continue;
+		const double hy = H_CAM + dyc * sh;
+		if (hy < 0 || hy > 3.2)
+			continue;
+		best = sh;
+		const double hx = dx * sh - px, hz = dz * sh - pz;
+		bu = atan2(hz, hx) * 0.4 + 7.0 * i;
+	}
+	const double sg = dyc < 0 ? H_CAM / -dyc : 1e9;
+	if (best < 1e9 && best < sg) {
+		// Pillar: stone with fine detail and thin grooves every 0.3 units of height.
+		const double hy = H_CAM + dyc * best, k = 160.0;
+		const double fade = 1.0 / (1.0 + best / 10.0);
+		double n = 0.5 * vnoise(bu * k / 9.0, hy * k / 9.0, 41) + 0.3 * vnoise(bu * k / 3.0, hy * k / 3.0, 42) + 0.2 * vnoise(bu * k / 1.3, hy * k / 1.3, 43);
+		const double groove = 1.0 - 0.7 * pcov(hy, 0.3, 0.012, 0.5 * best / H_F);
+		const double v = (0.35 + 0.5 * (0.5 + (n - 0.5) * fade)) * (1.0 - (1.0 - groove) * fade);
+		rgb[0] = 0.95 * v;
+		rgb[1] = 0.85 * v;
+		rgb[2] = 0.70 * v;
+		return;
+	}
+	if (sg < 60.0) {
+		// Ground: 1x1 tiles with thin grout lines and fine speckle, fading with distance.
+		const double gx = dx * sg, gz = dz * sg + cz;
+		const double fade = 1.0 / (1.0 + sg / 6.0);
+		const double gw = 0.025, fpx = 0.5 * sg / H_F, fpz = fpx * sg / H_CAM;
+		const double cx_ = pcov(gx, 1.0, gw, fpx), cz_ = pcov(gz, 1.0, gw, fpz);
+		const double grout = 1.0 - 0.75 * (cx_ > cz_ ? cx_ : cz_);
+		const double n = 0.5 * vnoise(gx * 7.0, gz * 7.0, 44) + 0.5 * vnoise(gx * 40.0, gz * 40.0, 45);
+		const double tone = 0.55 + 0.25 * hash2((int)floor(gx), (int)floor(gz), 46);
+		const double v = (tone + 0.35 * (n - 0.5) * fade) * (1.0 - (1.0 - grout) * fade);
+		rgb[0] = 0.75 * v;
+		rgb[1] = 0.80 * v;
+		rgb[2] = 0.85 * v;
+		return;
+	}
+	// Far panorama: only the turn moves it.
+	const double ang = atan2(dx, dz);
+	background(ang * H_F, y, 47, rgb);
+}
+
+static void hpar(const scene *s, double t, double x, double y, double rgb[3])
+{
+	// Layered pan: far hills (0.35 v), a fence of thin posts and rails (v), near foliage (1.6 v).
+	const double vx = s->vx, vy = s->vy;
+	const double nx = x - 1.4 * vx * t, ny = y - 1.4 * vy * t;
+	// Near layer: blobs of fine foliage-like detail.
+	const double m = vnoise(nx / 90.0, ny / 90.0, 61);
+	if (m > 0.62) {
+		const double d = 0.45 * vnoise(nx / 3.0, ny / 3.0, 62) + 0.35 * vnoise(nx / 2.0, ny / 2.0, 63) + 0.2 * vnoise(nx / 7.0, ny / 7.0, 64);
+		const double edge = m < 0.66 ? 0.6 : 1.0;
+		rgb[0] = (0.10 + 0.25 * d) * edge;
+		rgb[1] = (0.25 + 0.55 * d) * edge;
+		rgb[2] = (0.08 + 0.15 * d) * edge;
+		return;
+	}
+	const double fx = x - vx * t, fy = y - vy * t;
+	// Posts 2 px wide every 61, rails 1 px high every 53 (box-filtered).
+	const double cp = pcov(fx, 61.0, 2.0, 0.5);
+	const double cr = pcov(fy, 53.0, 1.0, 0.5);
+	background(x - 0.35 * vx * t, y - 0.35 * vy * t, 65, rgb);
+	const double c2 = cp > cr ? cp : cr;
+	for (int k = 0; k < 3; k++)
+		rgb[k] = rgb[k] * (1.0 - c2) + 0.9 * c2;
+}
+
+static void hlines(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
+{
+	if (crosshair(x, y, w, h, rgb))
+		return;
+	const double u = x - s->vx * t, v = y - s->vy * t;
+	background(u, v, 71, rgb);
+	for (int k = 0; k < 3; k++)
+		rgb[k] = 0.35 + 0.4 * (rgb[k] - 0.5);  // a calm texture under the lines
+	// Thin straight lines: vertical 1 px every 29, horizontal 1 px every 41, a 2 px vertical
+	// every 113 and a 2 px horizontal every 97, and a straight diagonal edge every 151.
+	const double c1 = pcov(u, 29.0, 1.0, 0.5), c2 = pcov(v, 41.0, 1.0, 0.5);
+	const double d1 = pcov(u, 113.0, 2.0, 0.5), d2 = pcov(v, 97.0, 2.0, 0.5);
+	const double c = c1 > c2 ? c1 : c2, d = d1 > d2 ? d1 : d2;
+	const double g = pcov(u + 0.6 * v, 151.0, 75.0, 0.5 * 1.6);  // straight diagonal edges
+	for (int k = 0; k < 3; k++) {
+		rgb[k] = rgb[k] * (1.0 - g) + (0.75 * rgb[k] + 0.2) * g;
+		rgb[k] = rgb[k] * (1.0 - c) + 0.92 * c;
+		rgb[k] = rgb[k] * (1.0 - d) + 0.04 * d;
+	}
+}
+
 static void scene_pixel(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
 {
 	switch (s->kind) {
+	case S_HTURN:
+		hturn(s, t, x, y, rgb);
+		return;
+	case S_HTURN_DARK: {
+		// The same yard at night: dim and low contrast, with per-frame grain (TAA noise).
+		hturn(s, t, x, y, rgb);
+		const double g = (hash2((int)x, (int)y, 2000 + (int)lrint(t * 64.0)) - 0.5) * 0.03;
+		for (int k = 0; k < 3; k++)
+			rgb[k] = 0.06 + 0.3 * rgb[k] + g;
+		return;
+	}
+	case S_HPAR:
+		hpar(s, t, x, y, rgb);
+		return;
+	case S_HLINES:
+		hlines(s, t, x, y, w, h, rgb);
+		return;
 	case S_CAMERA: {
 		if (hud(x, y, w, h, rgb))
 			return;
@@ -741,6 +909,245 @@ static int cmp_double(const void *a, const void *b)
 	return x < y ? -1 : x > y;
 }
 
+// ---- harder set (--hard, GSF 1.5) ----------------------------------------------------------
+static double luma_px(const uint8_t *a, size_t i) { return 0.299 * a[4 * i] + 0.587 * a[4 * i + 1] + 0.114 * a[4 * i + 2]; }
+
+// Luma Laplacian magnitude into hp (0 at the border).
+static void laplace(const uint8_t *img, int w, int h, float *hp)
+{
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++) {
+			const size_t i = (size_t)y * w + x;
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) {
+				hp[i] = 0;
+				continue;
+			}
+			hp[i] = (float)(4.0 * luma_px(img, i) - luma_px(img, i - 1) - luma_px(img, i + 1) - luma_px(img, i - (size_t)w) - luma_px(img, i + (size_t)w));
+		}
+}
+
+// Interior outlier blocks: 8x8 blocks whose mean |luma error| is above 6 (8-bit) and above
+// 2.5 times the median of its 8 neighbours': a square patch that does not fit around it,
+// what blocks inside the frame look like. Returns their share in % (borders of 16 px out).
+static double bad_blocks(const uint8_t *g, const uint8_t *t, int w, int h)
+{
+	const int bw = w / 8, bh = h / 8;
+	double *e = calloc((size_t)bw * bh, sizeof(double));
+	for (int by = 0; by < bh; by++)
+		for (int bx = 0; bx < bw; bx++) {
+			double sum = 0;
+			for (int y = by * 8; y < by * 8 + 8; y++)
+				for (int x = bx * 8; x < bx * 8 + 8; x++)
+					sum += fabs(luma_px(g, (size_t)y * w + x) - luma_px(t, (size_t)y * w + x));
+			e[by * bw + bx] = sum / 64.0;
+		}
+	int bad = 0, n = 0;
+	for (int by = 2; by < bh - 2; by++)
+		for (int bx = 2; bx < bw - 2; bx++) {
+			double nb[8];
+			int k = 0;
+			for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
+					if (dx || dy)
+						nb[k++] = e[(by + dy) * bw + bx + dx];
+			qsort(nb, 8, sizeof(double), cmp_double);
+			const double med = 0.5 * (nb[3] + nb[4]), v = e[by * bw + bx];
+			bad += v > 6.0 && v > 2.5 * med;
+			n++;
+		}
+	free(e);
+	return n ? 100.0 * bad / n : 0.0;
+}
+
+static const scene HARD[] = {
+	{ "h_pan_ref", S_PAN, 24, 6, true, false },  // the old pan, for reference
+	{ "h_turn24", S_HTURN, 24, 0.06, true, false },
+	{ "h_turn32", S_HTURN, 32, 0.10, true, false },
+	{ "h_turn40", S_HTURN, 40, 0.08, true, false },
+	{ "h_turn64", S_HTURN, 64, 0.12, true, false },
+	{ "h_turn96", S_HTURN, 96, 0.10, true, false },
+	{ "h_dark64", S_HTURN_DARK, 64, 0.12, true, false },
+	{ "h_parallax", S_HPAR, 30, 4, true, false },
+	{ "h_lines_slow", S_HLINES, 2.7, 0.9, true, false },
+	{ "h_lines_fast", S_HLINES, 24, 7, true, false },
+};
+
+// Every scene as a running sequence of 8 frames through the ring (temporal seeds on), shown as
+// the real frame and the generated phases of x3 (and x2). Per scene and mode:
+//   psnr:     mean and worst over the generated frames;
+//   errgrad, blk: blockiness (block_metric); badblk: interior outlier blocks, % (bad_blocks);
+//   temporal: mean |change error| between consecutive shown frames (temporal_err);
+//   lineflk:  the same in luma on line pixels only (|Laplacian| of the truth above 48 in
+//             either frame): shimmer of thin straight lines;
+//   sharpflk: mean change of the high-frequency energy ratio output / truth from one shown
+//             frame to the next, % (sharp real / soft generated alternation).
+static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char *only, const kfg_tuning *tune)
+{
+	const size_t nbytes = (size_t)w * h * 4, npx = (size_t)w * h;
+	uint8_t *B = malloc(nbytes), *T = malloc(nbytes), *O = malloc(nbytes), *Op = malloc(nbytes), *Tp = malloc(nbytes);
+	float *HO = malloc(npx * sizeof(float)), *HT = malloc(npx * sizeof(float)), *HTp = malloc(npx * sizeof(float));
+	const int frames = 8;
+	if (js)
+		fprintf(js, " \"hard\": [\n");
+	bool first = true;
+	double tot_ps = 0, tot_bb = 0, tot_lf = 0;
+	int tot_n = 0;
+	for (size_t si = 0; si < sizeof(HARD) / sizeof(HARD[0]); si++) {
+		const scene *s = &HARD[si];
+		if (only && strcmp(only, s->name))
+			continue;
+		for (int mode = 3; mode >= 2; mode--) {
+			if (mode == 2 && s->kind != S_HLINES && !getenv("KFG_HARD_X2"))
+				continue;
+			double ps = 0, worst = 1e9, eg = 0, bk = 0, bb = 0, bbmax = 0, te = 0, lf = 0, sf = 0, rprev = -1;
+			int n_ps = 0, n_te = 0, n_lf = 0;
+			bool have_prev = false;
+			for (int f = 0; f < frames; f++) {
+				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
+				render(s, (double)f, w, h, B);
+				kfg_vk_upload_rgba8(vk, &e->color[fb], B);
+				kfg_plan p;
+				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, tune);
+				run_plan(e, &p, NULL, NULL);
+				if (f == 0)
+					continue;
+				if (getenv("KFG_HARD_FIELD") && (s->kind == S_HLINES || s->kind == S_PAN || s->kind == S_HPAR) && mode == 3) {
+					// Tuning aid: share of blocks of the pair's field (and of the level-2 flow) within
+					// 0.25 / 0.5 / 1 px of the true motion (the uniform layer: lines, the pan, the fence).
+					const kfg_vk_image *im[2] = { &e->pair_select[fb], &e->flow[fb][2] };
+					for (int q = 0; q < 2; q++) {
+						const size_t nf = (size_t)im[q]->width * im[q]->height;
+						float *fl = malloc(nf * 4 * sizeof(float));
+						kfg_vk_download_rgba16f(vk, im[q], fl);
+						int c1 = 0, c2 = 0, c3 = 0;
+						double ex = 0, ey = 0;
+						for (size_t i = 0; i < nf; i++) {
+							const double dx = fl[i * 4] - s->vx, dy = fl[i * 4 + 1] - s->vy, d = hypot(dx, dy);
+							c1 += d < 0.25; c2 += d < 0.5; c3 += d < 1.0;
+							ex += fabs(dx); ey += fabs(dy);
+						}
+						printf("  f%d %s: %.0f%% / %.0f%% / %.0f%% within 0.25/0.5/1 px, mean |ex| %.2f |ey| %.2f\n", f, q ? "flow L2" : "field",
+						       100.0 * c1 / nf, 100.0 * c2 / nf, 100.0 * c3 / nf, ex / nf, ey / nf);
+						if (f == 4) {
+							static int hb[41][41];
+							memset(hb, 0, sizeof(hb));
+							double wsum = 0;
+							for (size_t i = 0; i < nf; i++) {
+								const int bx = (int)lrint(fl[i * 4] * 2) + 20, by = (int)lrint(fl[i * 4 + 1] * 2) + 20;
+								if (bx >= 0 && bx <= 40 && by >= 0 && by <= 40)
+									hb[by][bx]++;
+								wsum += fl[i * 4 + 3];
+							}
+							printf("    top (0.5 px):");
+							for (int k = 0; k < 6; k++) {
+								int m = 0, mx = 0, my = 0;
+								for (int y = 0; y <= 40; y++)
+									for (int x = 0; x <= 40; x++)
+										if (hb[y][x] > m) { m = hb[y][x]; mx = x; my = y; }
+								printf(" (%.1f,%.1f) %.0f%%", (mx - 20) * 0.5, (my - 20) * 0.5, 100.0 * m / nf);
+								hb[my][mx] = 0;
+							}
+							printf("  mean w %.3f\n", wsum / nf);
+							if (getenv("KFG_HARD_OUT")) {
+								char path[1024];
+								snprintf(path, sizeof(path), "%s/%s_%s.f32", getenv("KFG_HARD_OUT"), s->name, q ? "flow2" : "field");
+								FILE *ff = fopen(path, "wb");
+								if (ff) {
+									fwrite(&im[q]->width, 4, 1, ff);
+									fwrite(&im[q]->height, 4, 1, ff);
+									fwrite(fl, sizeof(float), nf * 4, ff);
+									fclose(ff);
+								}
+							}
+						}
+						free(fl);
+					}
+				}
+				for (int j = 0; j < mode; j++) {
+					const double t = (double)j / mode;
+					render(s, f - 1 + t, w, h, T);
+					if (j == 0) {
+						render(s, f - 1, w, h, O);
+					} else {
+						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, 0);
+						run_plan(e, &p, NULL, NULL);
+						kfg_vk_download_rgba8(vk, &e->output, O);
+						const double pg = psnr_region(O, T, w, h, 0, 0, w, h);
+						ps += pg;
+						worst = pg < worst ? pg : worst;
+						const blockiness bm = block_metric(O, T, w, h);
+						eg += bm.errgrad;
+						bk += bm.blk;
+						const double b = bad_blocks(O, T, w, h);
+						bb += b;
+						bbmax = b > bbmax ? b : bbmax;
+						n_ps++;
+						if (f == 4) {
+							char name[128];
+							snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_gen", s->name, mode, f, j);
+							write_ppm(getenv("KFG_HARD_OUT"), name, O, w, h);
+							snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_truth", s->name, mode, f, j);
+							write_ppm(getenv("KFG_HARD_OUT"), name, T, w, h);
+						}
+					}
+					laplace(O, w, h, HO);
+					laplace(T, w, h, HT);
+					double eo = 0, et = 0;
+					for (int y = 8; y < h - 8; y++)
+						for (int x = 8; x < w - 8; x++) {
+							const size_t i = (size_t)y * w + x;
+							eo += fabs(HO[i]);
+							et += fabs(HT[i]);
+						}
+					const double r = eo / (et + 1e-9);
+					if (have_prev) {
+						te += temporal_err(O, Op, T, Tp, w, h);
+						double sl = 0;
+						long nl = 0;
+						for (int y = 8; y < h - 8; y++)
+							for (int x = 8; x < w - 8; x++) {
+								const size_t i = (size_t)y * w + x;
+								if (fabs(HT[i]) < 48.0f && fabs(HTp[i]) < 48.0f)
+									continue;
+								sl += fabs((luma_px(O, i) - luma_px(Op, i)) - (luma_px(T, i) - luma_px(Tp, i)));
+								nl++;
+							}
+						if (nl) {
+							lf += sl / (double)nl;
+							n_lf++;
+						}
+						sf += fabs(r - rprev);
+						n_te++;
+					}
+					rprev = r;
+					memcpy(Op, O, nbytes);
+					memcpy(Tp, T, nbytes);
+					float *tmp = HT; HT = HTp; HTp = tmp;
+					have_prev = true;
+				}
+			}
+			printf("hard %-13s x%d: psnr %.2f dB (worst %.2f) errgrad %.3f blk %.4f badblk %.3f%% (max %.3f) temporal %.3f lineflk %.3f sharpflk %.2f%%\n",
+			       s->name, mode, ps / n_ps, worst, eg / n_ps, bk / n_ps, bb / n_ps, bbmax, te / n_te, n_lf ? lf / n_lf : 0.0, 100.0 * sf / n_te);
+			if (mode == 3) {
+				tot_ps += ps / n_ps;
+				tot_bb += bb / n_ps;
+				tot_lf += n_lf ? lf / n_lf : 0.0;
+				tot_n++;
+			}
+			if (js)
+				fprintf(js, "%s  {\"scene\": \"%s\", \"mode\": %d, \"psnr\": %.3f, \"psnr_worst\": %.3f, \"errgrad\": %.4f, \"blk\": %.5f, \"badblk_pct\": %.4f, \"badblk_max\": %.4f, \"temporal\": %.4f, \"lineflk\": %.4f, \"sharpflk_pct\": %.3f}",
+					first ? "" : ",\n", s->name, mode, ps / n_ps, worst, eg / n_ps, bk / n_ps, bb / n_ps, bbmax, te / n_te, n_lf ? lf / n_lf : 0.0, 100.0 * sf / n_te);
+			first = false;
+		}
+	}
+	if (tot_n)
+		printf("hard x3 mean: psnr %.2f dB, badblk %.3f%%, lineflk %.3f\n", tot_ps / tot_n, tot_bb / tot_n, tot_lf / tot_n);
+	if (js)
+		fprintf(js, "\n ]\n}\n");
+	free(B); free(T); free(O); free(Op); free(Tp); free(HO); free(HT); free(HTp);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *spv = "build";
@@ -748,6 +1155,7 @@ int main(int argc, char **argv)
 	const char *json_path = NULL;
 	const char *only = NULL;   // run one scene (tuning); skips the sequence and stairs checks
 	int w = 1280, h = 800, bench = 0;
+	bool hard = false;
 	bool validation = getenv("KFG_VALIDATION") != NULL;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--spv") && i + 1 < argc) spv = argv[++i];
@@ -757,12 +1165,13 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--bench") && i + 1 < argc) bench = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--scene") && i + 1 < argc) only = argv[++i];
 		else if (!strcmp(argv[i], "--no-temporal")) g_temporal = 0;
+		else if (!strcmp(argv[i], "--hard")) hard = true;  // the harder set only (GSF 1.5)
 		else if (!strcmp(argv[i], "--lowbase")) { g_lowbase = true; g_timescale = 1.25; }
 		else if (!strcmp(argv[i], "--per-phase")) kfg_per_phase_select = 1;  // 1.2 selection, for A/B
 		else if (!strcmp(argv[i], "--scaled")) g_geo = -1.0;  // set from --size below
 		else if (!strcmp(argv[i], "--analysis-pixels") && i + 1 < argc) kfg_analysis_pixels = (uint32_t)atoi(argv[++i]);  // 0 = full size
 		else {
-			fprintf(stderr, "usage: kfg_vktest [--spv DIR] [--size WxH] [--out DIR] [--json FILE] [--bench N] [--scene NAME] [--no-temporal] [--lowbase] [--per-phase] [--scaled] [--analysis-pixels N]\n");
+			fprintf(stderr, "usage: kfg_vktest [--spv DIR] [--size WxH] [--out DIR] [--json FILE] [--bench N] [--scene NAME] [--no-temporal] [--lowbase] [--per-phase] [--scaled] [--analysis-pixels N] [--hard]\n");
 			return 2;
 		}
 	}
@@ -787,6 +1196,16 @@ int main(int argc, char **argv)
 		fprintf(js, "{\n \"device\": \"%s\",\n \"driver\": \"%s\",\n \"size\": [%d, %d],\n \"scenes\": [\n", vk.device_name, vk.driver_info, w, h);
 	int failures = 0;
 	printf("device: %s (%s)\n", vk.device_name, vk.driver_info);
+	if (hard) {
+		if (js)
+			fprintf(js, " ],\n");
+		hard_suite(&vk, &e, w, h, js, only, &tune);
+		if (js)
+			fclose(js);
+		engine_destroy(&e);
+		kfg_vk_destroy(&vk);
+		return 0;
+	}
 
 	const double phases_x3[] = { 1.0 / 3.0, 2.0 / 3.0, 0.5 };
 	const double phases_lb[] = { 4.0 / 15.0, 11.0 / 15.0, 7.0 / 15.0 };
