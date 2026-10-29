@@ -117,7 +117,7 @@ void main()
 	vec2 c1 = vec2(2 * p) + vec2(0.5);     // same point in level-1 texels
 
 	vec4 f = texelFetch(s_samplers[2], p, 0);
-	vec2 cand[10];
+	vec2 cand[12];
 	cand[0] = vec2(0.0);
 	cand[1] = f.xy;
 	cand[2] = -f.zw;
@@ -129,6 +129,26 @@ void main()
 	cand[7] = -texelFetch(s_samplers[2], clamp(p + ivec2(-2, 0), ivec2(0), fsize - 1), 0).zw;
 	cand[8] = -texelFetch(s_samplers[2], clamp(p + ivec2(2, 0), ivec2(0), fsize - 1), 0).zw;
 	cand[9] = kfg_global_at(3, cpix).xy;  // camera motion
+	// Projected candidates (GSF 1.5): the field is the motion of what is at the block at phase
+	// u_t, but the flow is stored where that content was in A (forward) and is in B
+	// (backward), on a fast turn tens of pixels away, past the neighbours above. Next to a
+	// pillar the block took the pillar's vector or the other way round, and squares of the
+	// wrong layer showed inside the frame. Look the flow up where the content comes from and
+	// goes to. (A second step, from there, measured no better and cost a HUD scene at x3.75
+	// 0.1 dB.) They pay a fee, so they win only where the motion changes over that
+	// distance, and not for content entering or leaving the frame (clamped edge flow there).
+	cand[10] = flow_at(cpix - u_t * cand[1], fsize).xy;
+	cand[11] = -flow_at(cpix + (1.0 - u_t) * cand[2], fsize).zw;
+	{
+		const vec2 full = vec2(2 * lsize);  // analysis pixels
+		const vec2 q[4] = vec2[4](cpix - u_t * cand[1], cpix + (1.0 - u_t) * cand[2], cpix - u_t * cand[10], cpix + (1.0 - u_t) * cand[11]);
+		bool outside = false;
+		for (int i = 0; i < 4; i++)
+			outside = outside || any(lessThan(q[i], vec2(8.0))) || any(greaterThanEqual(q[i], full - 8.0));
+		if (outside)
+			for (int i = 10; i < 12; i++)
+				cand[i] = cand[1];
+	}
 
 	// A candidate must also agree with the motion field where it lands in either source. On
 	// flat bands (stair treads) a wrong vector can match pale to pale on both sides, stepping
@@ -136,13 +156,13 @@ void main()
 	// window, still knows where the edge went.
 	// Neighbouring blocks mostly carry the same vector: each distinct candidate is matched
 	// once (raw[] keeps its match error, match[] that plus consistency; the fees differ).
-	float raw[10], match[10];
+	float raw[12], match[12];
 	raw[0] = cost(c1, vec2(0.0));
 	match[0] = raw[0] + consistency(cpix, vec2(0.0), fsize);
 	vec2 best = vec2(0.0);
 	float best_cost = match[0] - 0.004; // static pixels (HUD) stay static on ties
 	float best_raw = raw[0];
-	for (int i = 1; i < 10; i++) {
+	for (int i = 1; i < 12; i++) {
 		int same = -1;
 		for (int m = 0; m < i; m++)
 			same = (same < 0 && cand[m] == cand[i]) ? m : same;
@@ -150,7 +170,7 @@ void main()
 		match[i] = same >= 0 ? match[same] : raw[i] + consistency(cpix, cand[i], fsize);
 		// The camera motion pays a flat fee instead of its distance from the block's vector,
 		// so static content (HUD) keeps winning ties against it.
-		float c = match[i] + (i == 9 ? 0.002 : 0.0005 * length(cand[i] - f.xy));
+		float c = match[i] + (i == 9 ? 0.002 : i >= 10 ? 0.015 : 0.0005 * length(cand[i] - f.xy));
 		if (c < best_cost) {
 			best_cost = c;
 			best = cand[i];
@@ -170,10 +190,15 @@ void main()
 		const float dx = min(dlo.x, dhi.x), dy = min(dlo.y, dhi.y);
 		const int k = dx <= dy ? (dlo.x <= dhi.x ? 4 : 3) : (dlo.y <= dhi.y ? 6 : 5);
 		const vec2 n = cand[k];
+		// Only where the motion is about the same further in (a pan or a turn): in a zoom the
+		// vectors grow towards the edge and the neighbour's is short by the gradient (walking
+		// forward at 24 FPS, x3.75: -0.5 dB).
+		const vec2 n2 = texelFetch(s_samplers[2], clamp(p + 2 * offs[k - 3], ivec2(0), fsize - 1), 0).xy;
+		const bool uniform_in = length(n - n2) < 6.0;
 		const vec2 qa = cpix - u_t * n, qb = cpix + (1.0 - u_t) * n;
 		const bool outa = any(lessThan(qa, vec2(0.0))) || any(greaterThanEqual(qa, full));
 		const bool outb = any(lessThan(qb, vec2(0.0))) || any(greaterThanEqual(qb, full));
-		if (outa != outb && best_cost > 0.03 && best != n) {
+		if (outa != outb && best_cost > 0.03 && best != n && uniform_in) {
 			best = n;
 			best_cost = match[k] + 0.01;  // matched across the edge: no sub-pixel refinement
 			best_raw = raw[k];
