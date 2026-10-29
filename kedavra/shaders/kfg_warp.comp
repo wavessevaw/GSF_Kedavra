@@ -86,6 +86,15 @@ void main()
 	vec4 s01 = texelFetch(s_samplers[2], clamp(b0 + ivec2(0, 1), ivec2(0), bsize - 1), 0);
 	vec4 s11 = texelFetch(s_samplers[2], clamp(b0 + ivec2(1, 1), ivec2(0), bsize - 1), 0);
 	vec4 sel;
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+	// Experiment (GSF 1.5, off): soft selection at motion boundaries, overlapped-block style:
+	// the four neighbouring block motions' pictures, weighted by position and by how well each
+	// explains the pixel, where no single one is clearly best. lavapipe: +0.1..0.25 dB on most
+	// moving scenes, -0.35 dB on thin lines at 12 px/frame and more stairs shimmer; not on.
+	float p2_e[4], p2_w[4], p2_best = 0.0;
+	vec3 p2_c[4];
+	bool p2_on = false;
+#endif
 	// A still block next to this pixel (HUD, static world), for the static test below.
 	const bool still_near = s00.xy == vec2(0.0) || s10.xy == vec2(0.0) || s01.xy == vec2(0.0) || s11.xy == vec2(0.0);
 	// Only a threshold is needed: avoid three square roots per output pixel.
@@ -100,16 +109,28 @@ void main()
 		int own = (fr.x < 0.5 ? 0 : 1) + (fr.y < 0.5 ? 0 : 2);
 		float best = 1e9;
 		sel = cand[own];
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+		const vec2 bw[2] = vec2[2](1.0 - fr, fr);
+#endif
 		for (int i = 0; i < 4; i++) {
 			vec2 v = cand[i].xy * sc;
 			vec3 a = kfg_tap(0, vec2(p) - u_t * v, size).rgb;
 			vec3 b = kfg_tap(1, vec2(p) + (1.0 - u_t) * v, size).rgb;
 			float e = dot(abs(a - b), vec3(1.0)) - (i == own ? 0.02 : 0.0);
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+			p2_e[i] = e;
+			p2_c[i] = mix(a, b, u_t);
+			p2_w[i] = bw[i & 1].x * bw[i >> 1].y;
+#endif
 			if (e < best) {
 				best = e;
 				sel = cand[i];
 			}
 		}
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+		p2_best = best;
+		p2_on = true;
+#endif
 	}
 	vec2 v = sel.xy * sc;
 	vec2 pa = vec2(p) - u_t * v;
@@ -158,6 +179,21 @@ void main()
 	if (w_b > 0.0)
 		cb = fract(pb) == vec2(0.0) ? texelFetch(s_samplers[1], clamp(ivec2(pb), ivec2(0), size - 1), 0) : tap_sharp(1, pb, size);
 	vec3 c = mix(ca.rgb, cb.rgb, w_b);
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+	if (p2_on && !still) {
+		float ws = 0.0, wbest = 0.0;
+		vec3 acc = vec3(0.0);
+		for (int i = 0; i < 4; i++) {
+			const float wi = p2_w[i] * exp(-(p2_e[i] - p2_best) * (1.0 / 0.05));
+			acc += wi * p2_c[i];
+			ws += wi;
+			wbest = max(wbest, wi);
+		}
+		// Ambiguous: blend towards the soft result as the best one's share falls.
+		const float share = wbest / max(ws, 1e-6);
+		c = mix(acc / max(ws, 1e-6), c, smoothstep(0.55, 0.9, share));
+	}
+#endif
 	// Faint motion blur on fast motion only (a turn above ~10 px per game frame): two more
 	// taps per side along the motion, up to 4 px long. Static and slow content (HUD, text,
 	// slow turns) is untouched and costs nothing.

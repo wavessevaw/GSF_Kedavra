@@ -158,6 +158,27 @@ void main()
 		}
 	}
 
+	// Frame edges (GSF 1.5): content entering or leaving the frame on a fast turn has no match
+	// on one side, so no candidate explains it and the search returned a scattered best (square
+	// artifacts along the edge). A block whose best match is still poor takes the motion of the
+	// block two steps further in from its nearest edge, matched inside the frame, when that
+	// motion carries it out of one source (not the camera fit: a zoom or a large static HUD
+	// pulls the fit off at the edges).
+	{
+		const vec2 full = vec2(2 * lsize);  // analysis pixels
+		const vec2 dlo = cpix, dhi = full - cpix;
+		const float dx = min(dlo.x, dhi.x), dy = min(dlo.y, dhi.y);
+		const int k = dx <= dy ? (dlo.x <= dhi.x ? 4 : 3) : (dlo.y <= dhi.y ? 6 : 5);
+		const vec2 n = cand[k];
+		const vec2 qa = cpix - u_t * n, qb = cpix + (1.0 - u_t) * n;
+		const bool outa = any(lessThan(qa, vec2(0.0))) || any(greaterThanEqual(qa, full));
+		const bool outb = any(lessThan(qb, vec2(0.0))) || any(greaterThanEqual(qb, full));
+		if (outa != outb && best_cost > 0.03 && best != n) {
+			best = n;
+			best_cost = match[k] + 0.01;  // matched across the edge: no sub-pixel refinement
+			best_raw = raw[k];
+		}
+	}
 	// Sub-pixel refinement: the search ends on a 2-pixel grid (half a level-2 texel), so a slow
 	// turn would step between neighbouring grid vectors from one block and one frame to the
 	// next and fine texture would shimmer. Fit a parabola to the cost one pixel either side of
