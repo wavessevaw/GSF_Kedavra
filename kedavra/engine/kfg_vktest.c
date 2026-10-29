@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_TURN, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_XHAIR };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -124,6 +124,19 @@ static bool hud(double x, double y, int w, int h, double rgb[3])
 // Stairs and a railing: treads repeat every 14 pixels and the camera moves 18 per source
 // frame, so a wrong match 4 pixels off fits almost as well as the true motion (the aperture
 // problem behind flickering stairs and straight lines in games).
+// A centred crosshair (a static overlay over the moving world): arms 2 px wide from 5 to 17 px
+// off the centre and a 2x2 dot, white with a one-pixel dark outline.
+static bool crosshair(double x, double y, int w, int h, double rgb[3])
+{
+	const double dx = x - 0.5 * w, dy = y - 0.5 * h, ax = fabs(dx), ay = fabs(dy);
+	const bool core = (ax < 1 && ay < 1) || (ay < 1 && ax >= 5 && ax < 17) || (ax < 1 && ay >= 5 && ay < 17);
+	const bool edge = (ax < 2 && ay < 2) || (ay < 2 && ax >= 4 && ax < 18) || (ax < 2 && ay >= 4 && ay < 18);
+	if (!edge)
+		return false;
+	rgb[0] = rgb[1] = rgb[2] = core ? 0.95 : 0.08;
+	return true;
+}
+
 static void stairs(double x, double y, double rgb[3])
 {
 	const double n = 0.06 * vnoise(x / 9.0, y / 9.0, 5);
@@ -226,6 +239,10 @@ static void turn_project(double t0, double t1, double x, double y, double *x1, d
 static void scene_pixel(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
 {
 	switch (s->kind) {
+	case S_XHAIR:
+		if (crosshair(x, y, w, h, rgb))
+			return;
+		__attribute__((fallthrough));  // the turning world
 	case S_TURN:
 		if (hud(x, y, w, h, rgb))
 			return;
@@ -461,6 +478,29 @@ static double ssim(const uint8_t *a, const uint8_t *b, int w, int h)
 			n++;
 		}
 	return n ? sum / n : 1.0;
+}
+
+// Luma high-pass (4-neighbour Laplacian) into hp; returns its mean magnitude (interior).
+static double highpass(const uint8_t *img, int w, int h, float *hp)
+{
+	double sum = 0;
+	long n = 0;
+#define KFG_LUMA(i) (0.299f * img[4 * (i)] + 0.587f * img[4 * (i) + 1] + 0.114f * img[4 * (i) + 2])
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++) {
+			const size_t i = (size_t)y * w + x;
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) {
+				hp[i] = 0;
+				continue;
+			}
+			hp[i] = 4.0f * KFG_LUMA(i) - KFG_LUMA(i - 1) - KFG_LUMA(i + 1) - KFG_LUMA(i - (size_t)w) - KFG_LUMA(i + (size_t)w);
+			if (x >= 8 && y >= 8 && x < w - 8 && y < h - 8) {
+				sum += fabs(hp[i]);
+				n++;
+			}
+		}
+#undef KFG_LUMA
+	return n ? sum / (double)n : 0;
 }
 
 // Screen border metric, independent of the layout scaling used by object regions.
@@ -1362,6 +1402,101 @@ int main(int argc, char **argv)
 				s->name, te_gen / n_te, te_dup / n_te, ps_gen / n_ps, ps_dup / n_ps);
 		free(O); free(Op); free(Tp); free(Dp);
 	}
+
+	// Flicker (GSF 1.5): what the eye sees as shimmer of fine detail during motion. Each shown
+	// frame (real, then the generated phases of x2 or x3) is high-passed (luma Laplacian):
+	//   sharpness: high-frequency energy of the output over the truth's, generated frames only
+	//              (1.0: as sharp as the truth; real frames are 1.0 by construction);
+	//   flicker:   mean change of that ratio from one shown frame to the next, in % (sharp
+	//              real / soft generated alternation at 30-45 Hz);
+	//   hf jitter: mean |change of the high-passed output - change of the high-passed truth|
+	//              between consecutive shown frames (fine detail trembling in place).
+	// Also the crosshair's mean error over a turn (a centred static overlay).
+	static const struct { scene s; int frames; } FLICKER[] = {
+		{ { "pan", S_PAN, 24, 6, true, false }, 8 },
+		{ { "slow_pan", S_PAN, 2.6, 0.8, true, false }, 8 },
+		{ { "thin_lines", S_LINES, 9, 3, true, false }, 8 },
+		{ { "slow_lines", S_LINES, 3.4, 1.1, true, false }, 8 },
+		{ { "camera", S_CAMERA, 0, 0, true, false }, CAM_FRAMES },
+		{ { "turn_xhair", S_XHAIR, 0, 0, true, false }, TURN_FRAMES },
+	};
+	if (js)
+		fprintf(js, " \"flicker\": {");
+	for (size_t fi = 0; fi < sizeof(FLICKER) / sizeof(FLICKER[0]); fi++) {
+		const scene *s = &FLICKER[fi].s;
+		if (only && strcmp(only, "flicker") && strncmp(only, "flicker_", 8))
+			continue;
+		if (only && !strncmp(only, "flicker_", 8) && strcmp(only + 8, s->name))
+			continue;
+		const size_t npx = (size_t)w * h;
+		uint8_t *O = malloc(nbytes);
+		float *H = malloc(npx * sizeof(float)), *Hp = malloc(npx * sizeof(float)), *G = malloc(npx * sizeof(float)), *Gp = malloc(npx * sizeof(float));
+		for (int mode = 2; mode <= 3; mode++) {
+			double sh = 0, fl = 0, jit = 0, xh = 0, xh_max = 0;
+			int n_sh = 0, n_fl = 0, n_xh = 0;
+			double r_prev = -1;
+			for (int f = 0; f <= FLICKER[fi].frames; f++) {
+				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
+				render(s, (double)f, w, h, B);
+				kfg_vk_upload_rgba8(&vk, &e.color[fb], B);
+				kfg_plan p;
+				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, &tune);
+				run_plan(&e, &p, NULL, NULL);
+				if (f == 0)
+					continue;
+				for (int j = 0; j < mode; j++) {
+					const double t = (double)j / mode;
+					render(s, f - 1 + t, w, h, T);
+					if (j == 0) {
+						memcpy(O, T, nbytes);  // the real frame
+					} else {
+						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, 0);
+						run_plan(&e, &p, NULL, NULL);
+						kfg_vk_download_rgba8(&vk, &e.output, O);
+					}
+					const double eo = highpass(O, w, h, H), et = highpass(T, w, h, G);
+					const double r = eo / (et + 1e-9);
+					if (j > 0) {
+						sh += r;
+						n_sh++;
+					}
+					if (r_prev >= 0) {
+						fl += fabs(r - r_prev);
+						double sj = 0;
+						long nj = 0;
+						for (int y = 8; y < h - 8; y++)
+							for (int x = 8; x < w - 8; x++) {
+								const size_t i = (size_t)y * w + x;
+								sj += fabs((H[i] - Hp[i]) - (G[i] - Gp[i]));
+								nj++;
+							}
+						jit += sj / (double)nj;
+						n_fl++;
+					}
+					if (s->kind == S_XHAIR && j > 0) {
+						const double e1 = mean_abs(O, T, w, h, w / 2 - 20, h / 2 - 20, w / 2 + 20, h / 2 + 20);
+						xh += e1;
+						n_xh++;
+						if (e1 > xh_max)
+							xh_max = e1;
+					}
+					r_prev = r;
+					float *tmp = H; H = Hp; Hp = tmp;
+					tmp = G; G = Gp; Gp = tmp;
+				}
+			}
+			printf("flicker %-11s x%d: sharpness gen/truth %.3f, flicker %.2f %%, hf jitter %.3f", s->name, mode, sh / n_sh, 100.0 * fl / n_fl, jit / n_fl);
+			if (s->kind == S_XHAIR)
+				printf(", crosshair err %.2f (max %.2f)", xh / n_xh, xh_max);
+			printf("\n");
+			if (js)
+				fprintf(js, "%s\"%s_x%d\": {\"sharpness\": %.4f, \"flicker_pct\": %.3f, \"hf_jitter\": %.4f, \"crosshair_err\": %.3f}",
+					fi || mode > 2 ? ", " : "", s->name, mode, sh / n_sh, 100.0 * fl / n_fl, jit / n_fl, n_xh ? xh / n_xh : 0.0);
+		}
+		free(O); free(H); free(Hp); free(G); free(Gp);
+	}
+	if (js)
+		fprintf(js, "},\n");
 
 	if (!only || !strncmp(only, "hdr", 3)) {
 		failures += hdr_checks(&vk, w, h, KFG_TRANSFER_PQ, js);
