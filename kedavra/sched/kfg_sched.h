@@ -559,6 +559,17 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		if (step < Q) {
 			d.catchup = true;
 			s->n_catchup++;
+			if (s->wall_ref >= 0 && k - s->realign_k <= 2 * (int64_t)s->cfg.multiplier + 2) {
+				// A slow-down right after a catch-up (GSF 1.5): the catch-up aimed at a delay
+				// the source cannot keep (an uneven cadence of 3 and 4 vblanks, often after a
+				// hitch). Back off one vblank, as for a repeat below; otherwise the two took
+				// turns every few vblanks (1.25x, 0.88x, 0.88x) for as long as the cadence
+				// lasted, the slow-down never being a repeat that would have backed off.
+				if (s->wall_ref < (int64_t)s->cfg.max_delay)
+					s->wall_ref++;
+				s->catchup = 0;
+				s->realign_k = INT64_MIN / 2;
+			}
 		}
 	}
 	int64_t p = base + step;

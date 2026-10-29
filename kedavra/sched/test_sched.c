@@ -174,6 +174,56 @@ static void test_silk_catchup(void)
 }
 
 // Analysis that never keeps up must suspend generation (passthrough), then retry.
+// A source under the cap with an uneven cadence (3 and 4 vblanks, 26 FPS under cap 30 at x3),
+// around a 155 ms game hitch (GSF 1.5; the latch timing of `kfg_replay.py hitch --hitch-ms
+// 155`): the catch-up must not keep aiming at a delay the cadence cannot hold. 1.4.0 sped up
+// (1.25x) and slowed down (0.88x) again every 7 vblanks for as long as the cadence lasted.
+static const uint8_t k_uneven_iv[] = {
+	4, 4, 3, 3, 3, 3, 3, 4, 3, 4, 3, 4, 3, 3, 4, 3, 4, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3,
+	4, 3, 4, 3, 4, 3, 3, 4, 3, 4, 3, 4, 3, 3, 4, 3, 4, 3, 3, 4, 4, 3, 3, 3, 4, 4, 3, 3, 4, 4, 3,
+	3, 3, 4, 3, 3, 3, 4, 3, 3, 4, 4, 4, 3, 3, 4, 3, 3, 4, 3, 3, 4, 3, 3, 3, 3, 4, 3, 4, 3, 4, 3,
+	4, 3, 3, 3, 4, 3, 4, 3, 4, 3, 3, 4, 3, 3, 3, 4, 3, 3, 4, 3, 4, 4, 3, 3, 4, 3, 3, 4, 4, 3, 3,
+	4, 3, 3, 4, 4, 3, 4, 3, 4, 4, 3, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 3, 3, 4, 4, 3, 4, 4,
+	3, 3, 4, 4, 3, 3, 4, 4, 3, 4, 3, 4, 3, 4, 4, 3, 3, 4, 3, 4, 4, 3, 3, 4, 3, 4, 3, 3, 4, 3, 4,
+	3, 3, 3, 3, 4, 4, 3, 4, 3, 4, 4, 3, 4, 3, 4, 3, 4, 3, 4, 4, 3, 3, 4, 3, 3, 4, 3, 4, 3, 3, 3,
+	4, 4, 3, 4, 3, 4, 3, 3, 4, 3, 3, 4, 3, 4, 4, 3, 3, 4, 4, 3, 4, 4, 3, 3, 3, 4, 4, 3, 3, 3, 4,
+	4, 3, 3, 4, 3, 4, 4, 3, 3, 4, 3, 4, 4, 14, 3, 4, 3, 4, 3, 4, 3, 4, 4, 4, 3, 4, 3, 4, 3, 4, 4,
+	3, 4, 3, 4, 3, 3, 4, 3, 4, 4, 3, 3, 4, 3, 4, 4, 3, 3, 3, 4, 3, 4, 3, 4, 4, 3, 4, 3, 3, 4, 3,
+	3, 4, 3, 4, 4, 3, 3, 4, 3, 3, 4, 3, 4, 3, 3, 4, 4, 3, 3, 4, 3, 4, 3, 4, 3, 4, 3, 4, 3, 3, 4,
+	3, 4, 3, 4, 3, 4, 3, 4, 3, 3, 4, 4, 3, 3, 3, 4, 3, 3, 4, 3, 3, 4, 3, 4, 3, 3, 4, 3, 4, 3, 3,
+	4, 3, 3, 4, 3, 3, 4, 3, 4, 3, 4, 3, 3, 4, 3, 4, 3, 3, 3, 4, 3, 3, 3, 4, 3, 4, 3, 3, 4, 3, 4,
+	4, 3, 4, 3, 3, 4, 3, 4, 3, 4, 3, 3, 3, 4, 3, 4, 3, 3, 4, 3, 4, 3, 4, 4, 3, 3, 3, 3,
+};
+
+static void test_uneven_after_hitch(void)
+{
+	kfg_sched_config cfg = kfg_sched_default_config(3);
+	kfg_sched s;
+	kfg_sched_init(&s, &cfg);
+	const size_t n = sizeof(k_uneven_iv);
+	uint64_t id = 0;
+	size_t i = 0;
+	int64_t next = 4, prev_pos = INT64_MIN, last_fast = -100;
+	int alternations = 0;
+	for (int64_t k = 0; i < n; k++) {
+		if (k == next) {
+			kfg_sched_on_latch(&s, ++id, k);
+			kfg_sched_on_me(&s, id, k + 1, true, false);
+			next = k + k_uneven_iv[i++];
+		}
+		kfg_decision d = kfg_sched_decide(&s, k);
+		if (d.show != KFG_SHOW_REAL && d.show != KFG_SHOW_GEN)
+			continue;
+		const int64_t step = prev_pos == INT64_MIN ? KFG_SCHED_SUB : d.pos - prev_pos;
+		prev_pos = d.pos;
+		if (step > KFG_SCHED_SUB)
+			last_fast = k;
+		else if (step < KFG_SCHED_SUB && k - last_fast <= 3)
+			alternations++;
+	}
+	CHECK(alternations <= 6, "catch-up / slow-down alternations: %d", alternations);
+}
+
 static void test_degrade(void)
 {
 	kfg_sched_config cfg = kfg_sched_default_config(3);
@@ -283,6 +333,7 @@ int main(void)
 	test_fractional_cap();
 	test_late_source_recovery();
 	test_silk_catchup();
+	test_uneven_after_hitch();
 	test_degrade();
 	test_cut();
 	test_fuzz();
