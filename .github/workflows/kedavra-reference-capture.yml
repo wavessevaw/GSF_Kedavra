@@ -1,0 +1,73 @@
+name: Historical KEDAVRA reference capture
+
+# Captures software Vulkan observations from the immutable 3.2.2 engine.
+# Success does not approve a release or establish Steam Deck image quality.
+on:
+  pull_request:
+    paths: ['.github/workflows/kedavra-reference-capture.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      BASE_SHA: 62621c4f9b60fd3cb95edafb62a1a44a1bb2c21e
+      GAMESCOPE_SHA: aa289ea5977d8b21b92b0f246f0e8f0c225d180f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify engine is the historical source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "$BASE_SHA^{commit}")" = "$BASE_SHA"
+          git diff --exit-code "$BASE_SHA" HEAD -- kedavra
+          test "$(sed -n 's/^GAMESCOPE_COMMIT=//p' kedavra/gamescope/apply.sh)" = "$GAMESCOPE_SHA"
+      - name: Install software Vulkan and shader tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools vulkan-tools
+      - name: Build historical engine tester
+        run: make -C kedavra all
+      - name: Capture fixed SDR scenes on lavapipe
+        run: |
+          set -euo pipefail
+          unset KFG_DEVICE KFG_PANV KFG_VALIDATION KFG_FLOWDUMP KFG_HARD_OUT KFG_HARD_FIELD KFG_HARD_X2 KFG_HARD_VERBOSE KFG_VERBOSE
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -maxdepth 1 -name 'lvp_icd*.json' -print -quit)"
+          test -f "$VK_ICD_FILENAMES"
+          root="$RUNNER_TEMP/gsf-reference"
+          mkdir -p "$root/frames/x3" "$root/frames/x3_75" "$root/logs" "$RUNNER_TEMP/gsf-capture-work"
+          vulkaninfo --summary > "$root/vulkaninfo.txt" 2>&1
+          { uname -a; python3 --version; cc --version; glslangValidator --version; dpkg-query -W libvulkan-dev mesa-vulkan-drivers glslang-tools vulkan-tools; } > "$root/environment.txt"
+          sha256sum kedavra/build/kfg_vktest kedavra/build/*.spv > "$root/build-sha256.txt"
+          git rev-parse HEAD > "$root/tested-merge-sha.txt"
+          for mode in x3 x3_75; do
+            for scene in pan fast_pan objects_hud occlusion thin_lines scene_cut; do
+              work="$RUNNER_TEMP/gsf-capture-work/$mode/$scene"
+              mkdir -p "$work"
+              if [ "$mode" = x3 ]; then
+                phases='333 667'
+                kedavra/build/kfg_vktest --spv kedavra/build --size 1280x800 --scene "$scene" --out "$work" > "$root/logs/${mode}_${scene}.txt" 2>&1
+              else
+                phases='267 733'
+                kedavra/build/kfg_vktest --spv kedavra/build --size 1280x800 --lowbase --scene "$scene" --out "$work" > "$root/logs/${mode}_${scene}.txt" 2>&1
+              fi
+              for phase in $phases; do
+                for kind in gen truth; do
+                  file="${scene}_t${phase}_${kind}.ppm"
+                  test -s "$work/$file"
+                  cp "$work/$file" "$root/frames/$mode/$file"
+                done
+              done
+            done
+          done
+          python3 -c 'import hashlib,json,os,pathlib; r=pathlib.Path(os.environ["RUNNER_TEMP"])/"gsf-reference"; frames=sorted((r/"frames").rglob("*.ppm")); assert len(frames)==48, len(frames); m={"class":"software Vulkan capture; not a Deck measurement", "gsf_commit":os.environ["BASE_SHA"], "gamescope_commit":os.environ["GAMESCOPE_SHA"], "size":[1280,800], "format":"PPM P6 RGB8", "scenes":["pan","fast_pan","objects_hud","occlusion","thin_lines","scene_cut"], "phases":{"x3":["333","667"],"x3_75":["267","733"]}, "frames":{str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in frames}}; (r/"manifest.json").write_text(json.dumps(m,indent=2)+"\n")'
+      - name: Save reference observations
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-3.2.2-reference-sdr-llvmpipe
+          path: ${{ runner.temp }}/gsf-reference
+          if-no-files-found: error
