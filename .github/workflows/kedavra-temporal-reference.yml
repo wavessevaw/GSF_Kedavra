@@ -1,0 +1,58 @@
+name: Historical KEDAVRA temporal observations
+
+# This workflow gathers simulation evidence; success does not qualify a release.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/kedavra-temporal-reference.yml'
+      - '.github/scripts/*temporal_reference.py'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BASE_SHA: 62621c4f9b60fd3cb95edafb62a1a44a1bb2c21e
+      GAMESCOPE_SHA: aa289ea5977d8b21b92b0f246f0e8f0c225d180f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check historical engine and validator
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "$BASE_SHA^{commit}")" = "$BASE_SHA"
+          git diff --exit-code "$BASE_SHA" HEAD -- kedavra
+          test "$(sed -n 's/^GAMESCOPE_COMMIT=//p' kedavra/gamescope/apply.sh)" = "$GAMESCOPE_SHA"
+          python3 -m unittest discover -s .github/scripts -p 'test_validate_temporal_reference.py' -v
+      - name: Install software Vulkan and shader tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools vulkan-tools
+      - name: Build unchanged engine tester
+        run: make -C kedavra all
+      - name: Observe fixed eight-frame scenes
+        run: |
+          set -euo pipefail
+          unset KFG_DEVICE KFG_PANV KFG_VALIDATION KFG_FLOWDUMP KFG_HARD_OUT KFG_HARD_FIELD KFG_HARD_X2 KFG_HARD_VERBOSE KFG_VERBOSE
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -maxdepth 1 -name 'lvp_icd*.json' -print -quit)"
+          test -f "$VK_ICD_FILENAMES"
+          root="$RUNNER_TEMP/gsf-temporal-reference"
+          mkdir -p "$root"
+          vulkaninfo --summary > "$root/vulkaninfo.txt" 2>&1
+          { uname -a; python3 --version; cc --version; glslangValidator --version; dpkg-query -W libvulkan-dev mesa-vulkan-drivers glslang-tools vulkan-tools; } > "$root/environment.txt"
+          sha256sum kedavra/build/kfg_vktest kedavra/build/*.spv > "$root/build-sha256.txt"
+          git rev-parse HEAD > "$root/tested-merge-sha.txt"
+          for scene in h_turn64 h_parallax h_lines_slow; do
+            kedavra/build/kfg_vktest --spv kedavra/build --size 1280x800 --hard --scene "$scene" --json "$root/$scene.json" > "$root/$scene.log" 2>&1
+          done
+          python3 .github/scripts/validate_temporal_reference.py "$root"
+      - name: Preserve software observations
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-3.2.2-temporal-llvmpipe
+          path: ${{ runner.temp }}/gsf-temporal-reference
+          if-no-files-found: error
