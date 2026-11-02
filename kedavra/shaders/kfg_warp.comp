@@ -114,11 +114,24 @@ void main()
 #endif
 		for (int i = 0; i < 4; i++) {
 			vec2 v = cand[i].xy * sc;
+#ifdef KFG_EXPERIMENT_LINE_PATCH
+			vec2 qa = vec2(p) - u_t * v, qb = vec2(p) + (1.0 - u_t) * v;
+			// Compare the line neighbourhood, not an accidental single-pixel match.
+			float e = 0.5 * (line_error(qa, qb, vec2(2.0, 0.0), size)
+			                       + line_error(qa, qb, vec2(0.0, 2.0), size));
+			e -= i == own ? 0.02 : 0.0;
+#else
 			vec3 a = kfg_tap(0, vec2(p) - u_t * v, size).rgb;
 			vec3 b = kfg_tap(1, vec2(p) + (1.0 - u_t) * v, size).rgb;
 			float e = dot(abs(a - b), vec3(1.0)) - (i == own ? 0.02 : 0.0);
+#endif
 #ifdef KFG_EXPERIMENT_SOFT_SELECT
 			p2_e[i] = e;
+			// The line-patch experiment is tested independently of soft selection.
+#ifdef KFG_EXPERIMENT_LINE_PATCH
+			vec3 a = kfg_tap(0, vec2(p) - u_t * v, size).rgb;
+			vec3 b = kfg_tap(1, vec2(p) + (1.0 - u_t) * v, size).rgb;
+#endif
 			p2_c[i] = mix(a, b, u_t);
 			p2_w[i] = bw[i & 1].x * bw[i >> 1].y;
 #endif
