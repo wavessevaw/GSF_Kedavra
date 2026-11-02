@@ -109,17 +109,33 @@ void main()
 		int own = (fr.x < 0.5 ? 0 : 1) + (fr.y < 0.5 ? 0 : 2);
 		float best = 1e9;
 		sel = cand[own];
+		// Equal vectors sample exactly the same source positions. Cache the raw error,
+		// not the ownership bias: a later duplicate may be the pixel's own block.
+		float raw_error[4];
 #ifdef KFG_EXPERIMENT_SOFT_SELECT
 		const vec2 bw[2] = vec2[2](1.0 - fr, fr);
 #endif
 		for (int i = 0; i < 4; i++) {
-			vec2 v = cand[i].xy * sc;
-			vec3 a = kfg_tap(0, vec2(p) - u_t * v, size).rgb;
-			vec3 b = kfg_tap(1, vec2(p) + (1.0 - u_t) * v, size).rgb;
-			float e = dot(abs(a - b), vec3(1.0)) - (i == own ? 0.02 : 0.0);
+			int same = -1;
+			for (int j = 0; j < i; j++)
+				if (cand[j].xy == cand[i].xy) { same = j; break; }
+			if (same >= 0) {
+				raw_error[i] = raw_error[same];
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+				p2_c[i] = p2_c[same];
+#endif
+			} else {
+				vec2 v = cand[i].xy * sc;
+				vec3 a = kfg_tap(0, vec2(p) - u_t * v, size).rgb;
+				vec3 b = kfg_tap(1, vec2(p) + (1.0 - u_t) * v, size).rgb;
+				raw_error[i] = dot(abs(a - b), vec3(1.0));
+#ifdef KFG_EXPERIMENT_SOFT_SELECT
+				p2_c[i] = mix(a, b, u_t);
+#endif
+			}
+			float e = raw_error[i] - (i == own ? 0.02 : 0.0);
 #ifdef KFG_EXPERIMENT_SOFT_SELECT
 			p2_e[i] = e;
-			p2_c[i] = mix(a, b, u_t);
 			p2_w[i] = bw[i & 1].x * bw[i >> 1].y;
 #endif
 			if (e < best) {
