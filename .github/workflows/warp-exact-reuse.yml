@@ -1,0 +1,56 @@
+name: Warp exact reuse comparison
+on:
+  pull_request:
+    paths: ['kedavra/**', '.github/workflows/warp-exact-reuse.yml']
+permissions:
+  contents: read
+jobs:
+  comparison:
+    if: github.head_ref == 'research/warp-exact-reuse'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: 62621c4f9b60fd3cb95edafb62a1a44a1bb2c21e
+          path: reference
+      - name: Build both revisions
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
+          make -C reference/kedavra all
+          make -C kedavra all
+          cmp reference/kedavra/engine/kfg_vktest.c kedavra/engine/kfg_vktest.c
+          cmp reference/kedavra/engine/kfg_vk.c kedavra/engine/kfg_vk.c
+      - name: Render the unchanged historical test suite with both shaders
+        run: |
+          set -euo pipefail
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          for variant in baseline candidate; do
+            spv=reference/kedavra/build
+            if [ "$variant" = candidate ]; then spv=kedavra/build; fi
+            for mode in normal lowbase; do
+              mkdir -p "evidence/$variant/$mode"
+              flags=()
+              if [ "$mode" = lowbase ]; then flags=(--lowbase); fi
+              reference/kedavra/build/kfg_vktest --spv "$spv" "${flags[@]}" --out "evidence/$variant/$mode" --json "evidence/$variant/$mode.json" > "evidence/$variant/$mode.log" 2>&1
+            done
+          done
+      - name: Reject any image or metric change
+        run: python3 kedavra/tools/compare_exact_reuse.py evidence
+      - name: Preserve evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-exact-reuse-evidence
+          path: |
+            evidence/**/*.json
+            evidence/**/*.log
+            evidence/*.txt
+          if-no-files-found: error
