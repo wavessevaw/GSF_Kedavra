@@ -1017,6 +1017,10 @@ static const scene HARD[] = {
 	{ "h_parallax", S_HPAR, 30, 4, true, false },
 	{ "h_lines_slow", S_HLINES, 2.7, 0.9, true, false },
 	{ "h_lines_fast", S_HLINES, 24, 7, true, false },
+	// Additional quality experiments; existing scenes and assertions stay unchanged.
+	{ "h_stairs", S_STAIRS, 18, 10, true, false },
+	{ "h_lines_vertical_motion", S_LINES, 0, 3, true, false },
+	{ "h_lines_horizontal_motion", S_LINES, 12, 0, true, false },
 };
 
 // Every scene as a running sequence of 8 frames through the ring (temporal seeds on), shown as

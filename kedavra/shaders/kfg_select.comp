@@ -16,6 +16,31 @@ float cost(vec2 c1, vec2 v)
 	// c1: block centre in level-1 texels; v: candidate motion in pixels.
 	vec2 pa = c1 - u_t * v * 0.5;
 	vec2 pb = c1 + (1.0 - u_t) * v * 0.5;
+#ifdef KFG_EXPERIMENT_CROSS_COST
+	// Quality experiment: give vertical lines the same support as stair risers.
+	// Keep the two orientations separate; gradients reuse these same samples.
+	const float offsets[5] = float[5](-3.0, -1.5, 0.0, 1.5, 3.0);
+	float error = 0.0, gradient_error = 0.0;
+	for (int axis = 0; axis < 2; axis++)
+		for (int arm = 0; arm < 2; arm++) {
+			float previous_a = 0.0, previous_b = 0.0;
+			for (int i = 0; i < 5; i++) {
+				vec2 o = vec2(arm == 0 ? -0.5 : 0.5, offsets[i]);
+				if (axis == 1) o = o.yx;
+				float a = kfg_tap(0, pa + o, lsize).r;
+				float b = kfg_tap(1, pb + o, lsize).r;
+				error += abs(a - b);
+				if (i > 0) gradient_error += abs((a - previous_a) - (b - previous_b));
+				previous_a = a;
+				previous_b = b;
+			}
+		}
+#ifdef KFG_EXPERIMENT_GRADIENT_COST
+	return error * 0.05 + gradient_error * (0.2 / 16.0);
+#else
+	return error * 0.05;
+#endif
+#else
 	// A window 3 texels wide and 7 tall at level 1 (6 x 14 pixels): tall enough to reach a
 	// thin horizontal edge (a stair riser) next to a flat block, so a vector that steps over
 	// the edge and matches flat to flat on both sides no longer looks perfect. Sampled with
@@ -28,6 +53,7 @@ float cost(vec2 c1, vec2 v)
 			e += abs(kfg_tap(0, pa + o, lsize).r - kfg_tap(1, pb + o, lsize).r);
 		}
 	return e * 0.1;
+#endif
 }
 
 vec4 flow_at(vec2 pix, ivec2 fsize)

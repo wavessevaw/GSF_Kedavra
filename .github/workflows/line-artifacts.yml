@@ -1,0 +1,51 @@
+name: Straight-line artifact experiments
+on:
+  pull_request:
+    paths: ['kedavra/**', '.github/workflows/line-artifacts.yml']
+permissions:
+  contents: read
+jobs:
+  render:
+    if: github.head_ref == 'research/line-artifact-cost'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, cross, cross_gradient, line_patch]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Build the renderer and isolated shader variants
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
+          make -C kedavra all
+          case "$VARIANT" in
+            cross) glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders -DKFG_EXPERIMENT_CROSS_COST -o kedavra/build/kfg_select.spv kedavra/shaders/kfg_select.comp ;;
+            cross_gradient) glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders -DKFG_EXPERIMENT_CROSS_COST -DKFG_EXPERIMENT_GRADIENT_COST -o kedavra/build/kfg_select.spv kedavra/shaders/kfg_select.comp ;;
+            line_patch) glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders -DKFG_EXPERIMENT_LINE_PATCH -o kedavra/build/kfg_warp.spv kedavra/shaders/kfg_warp.comp ;;
+          esac
+      - name: Render fixed hard sequences
+        run: |
+          set -euo pipefail
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source.txt
+          sha256sum kedavra/build/*.spv > evidence/shaders.sha256
+          export KFG_HARD_X2=1
+          for scene in h_lines_slow h_lines_fast h_stairs h_lines_vertical_motion h_lines_horizontal_motion h_parallax h_turn64; do
+            mkdir -p "evidence/$scene"
+            KFG_HARD_OUT="evidence/$scene" kedavra/build/kfg_vktest --spv kedavra/build --hard --scene "$scene" --json "evidence/$scene.json" > "evidence/$scene.log" 2>&1
+          done
+      - name: Preserve raw images and quality metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: line-artifacts-${{ matrix.variant }}
+          path: evidence
+          if-no-files-found: error
