@@ -26,13 +26,20 @@ vec4 tap_sharp(int slot, vec2 pos, ivec2 size)
 	vec2 o12 = w2 / w12;
 	vec2 inv = 1.0 / vec2(size);
 	vec2 p0 = (c - 1.0) * inv, p3 = (c + 2.0) * inv, p12 = (c + o12) * inv;
-	vec4 r = textureLod(s_samplers[slot], vec2(p12.x, p0.y), 0.0) * (w12.x * w0.y)
-	       + textureLod(s_samplers[slot], vec2(p0.x, p12.y), 0.0) * (w0.x * w12.y)
-	       + textureLod(s_samplers[slot], p12, 0.0) * (w12.x * w12.y)
-	       + textureLod(s_samplers[slot], vec2(p3.x, p12.y), 0.0) * (w3.x * w12.y)
-	       + textureLod(s_samplers[slot], vec2(p12.x, p3.y), 0.0) * (w12.x * w3.y);
+	vec4 north = textureLod(s_samplers[slot], vec2(p12.x, p0.y), 0.0);
+	vec4 west = textureLod(s_samplers[slot], vec2(p0.x, p12.y), 0.0);
+	vec4 centre = textureLod(s_samplers[slot], p12, 0.0);
+	vec4 east = textureLod(s_samplers[slot], vec2(p3.x, p12.y), 0.0);
+	vec4 south = textureLod(s_samplers[slot], vec2(p12.x, p3.y), 0.0);
+	vec4 r = north * (w12.x * w0.y) + west * (w0.x * w12.y)
+	       + centre * (w12.x * w12.y) + east * (w3.x * w12.y) + south * (w12.x * w3.y);
 	float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
 	r /= wsum;
+	// Bound negative-lobe ringing to the samples already fetched. No new texture reads
+	// or passes. Local bounds preserve negative wide-gamut scRGB and HDR highlights.
+	vec4 lo = min(centre, min(min(north, south), min(west, east)));
+	vec4 hi = max(centre, max(max(north, south), max(west, east)));
+	r = clamp(r, lo, hi);
 	// Catmull-Rom overshoots below zero at edges. scRGB keeps negative values: they are
 	// colours outside BT.709, not overshoot, and clamping them would shift wide-gamut colour.
 	return (u_flags & KFG_FLAG_SCRGB) != 0 ? r : max(r, vec4(0.0));

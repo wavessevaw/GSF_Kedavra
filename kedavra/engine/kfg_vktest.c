@@ -1231,6 +1231,51 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 	return 0;
 }
 
+// A fractional warp of a bounded step must not invent bright/dark halos.
+// Known motion isolates reconstruction from the estimator; both x3 phases and x2.
+static int ringing_checks(kfg_vk *vk)
+{
+	const int w = 64, h = 48;
+	engine e;
+	if (engine_init(&e, vk, w, h, VK_FORMAT_R8G8B8A8_UNORM)) return 1;
+	uint8_t input[64 * 48 * 4], output[sizeof(input)];
+	_Float16 field[16 * 12 * 4];
+	uint16_t stats[16] = {0};
+	kfg_vk_upload_raw(vk, &e.stats[1], stats, sizeof(stats));
+	int violations = 0, max_overshoot = 0;
+	for (int axis = 0; axis < 2; axis++) {
+		for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+			int i = 4 * (y * w + x);
+			input[i] = input[i+1] = input[i+2] = (axis ? y >= h/2 : x >= w/2) ? 192 : 64;
+			input[i+3] = 255;
+		}
+		kfg_vk_upload_rgba8(vk, &e.color[0], input);
+		kfg_vk_upload_rgba8(vk, &e.color[1], input);
+		for (int i = 0; i < 16 * 12; i++) {
+			field[4*i] = axis ? 0 : 1;
+			field[4*i+1] = axis ? 1 : 0;
+			field[4*i+2] = 0; // isolate a single source's resampling
+			field[4*i+3] = 0;
+		}
+		kfg_vk_upload_raw(vk, &e.pair_select[1], field, sizeof(field));
+		const float phases[] = {1.0f/3.0f, 0.5f, 2.0f/3.0f};
+		for (int t = 0; t < 3; t++) {
+			kfg_plan p;
+			kfg_plan_generate(&p, w, h, 0, 1, 1, phases[t], 0);
+			run_plan(&e, &p, NULL, NULL);
+			kfg_vk_download_rgba8(vk, &e.output, output);
+			for (int i = 0; i < w*h; i++) {
+				int v = output[4*i], excess = v < 64 ? 64-v : v > 192 ? v-192 : 0;
+				violations += excess > 0;
+				if (excess > max_overshoot) max_overshoot = excess;
+			}
+		}
+	}
+	printf("ringing: %d out-of-range pixels, max overshoot %d code values\n", violations, max_overshoot);
+	engine_destroy(&e);
+	return violations != 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *spv = "build";
@@ -1302,6 +1347,11 @@ int main(int argc, char **argv)
 			continue;
 		render(s, 0.0, w, h, A);
 		render(s, 1.0, w, h, B);
+		char source_name[128];
+		snprintf(source_name, sizeof(source_name), "%s_source_a", s->name);
+		write_ppm(out_dir, source_name, A, w, h);
+		snprintf(source_name, sizeof(source_name), "%s_source_b", s->name);
+		write_ppm(out_dir, source_name, B, w, h);
 		kfg_vk_upload_rgba8(&vk, &e.color[0], A);
 		kfg_vk_upload_rgba8(&vk, &e.color[1], B);
 		kfg_plan p;
@@ -1693,6 +1743,9 @@ int main(int argc, char **argv)
 		failures += hdr_checks(&vk, w, h, KFG_TRANSFER_SCRGB, js);
 	}
 
+	if (!only || !strcmp(only, "ringing"))
+		failures += ringing_checks(&vk);
+
 	// Benchmark: analysis of one pair + two generated outputs (x3), GPU timestamps per pass.
 	if (bench > 0 && vk.timestamps) {
 		double samples[KFG_MAX_PASSES * 2][512];
@@ -1731,15 +1784,18 @@ int main(int argc, char **argv)
 		if (js)
 			fprintf(js, " \"bench\": {\"reps\": %d, \"passes\": [", reps);
 		for (uint32_t i = 0; i < npass; i++) {
+			double mean = 0;
+			for (int r = 0; r < reps; r++) mean += samples[i][r] / reps / 1e6;
 			qsort(samples[i], (size_t)reps, sizeof(double), cmp_double);
 			double med = samples[i][reps / 2] / 1e6, p99 = samples[i][(reps * 99) / 100] / 1e6;
-			printf("  %-12s %.3f (p99 %.3f)\n", labels[i], med, p99);
+			double p95 = samples[i][(reps * 95) / 100] / 1e6;
+			printf("  %-12s median %.3f mean %.3f p95 %.3f p99 %.3f\n", labels[i], med, mean, p95, p99);
 			if (strncmp(labels[i], "g", 1))
 				analysis += med;
 			else
 				gen += med;
 			if (js)
-				fprintf(js, "%s{\"pass\": \"%s\", \"median_ms\": %.4f, \"p99_ms\": %.4f}", i ? ", " : "", labels[i], med, p99);
+				fprintf(js, "%s{\"pass\": \"%s\", \"median_ms\": %.4f, \"mean_ms\": %.4f, \"p95_ms\": %.4f, \"p99_ms\": %.4f}", i ? ", " : "", labels[i], med, mean, p95, p99);
 		}
 		printf("  analysis %.3f ms, two outputs %.3f ms\n", analysis, gen);
 		// GPU time per second of play at 90 Hz: x3 (30 pairs, 60 generated frames) and
