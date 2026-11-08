@@ -1,0 +1,14 @@
+{
+ "device": "llvmpipe (LLVM 19.1.7, 256 bits)",
+ "driver": "llvmpipe Mesa 25.0.7-2+deb13u1 (LLVM 19.1.7)",
+ "size": [1280, 800],
+ "scenes": [
+  {"scene": "pan", "dynamic": true, "cut_flag": 0, "bad_fraction": 0.0057, "phases": [
+   {"t": 0.333333, "psnr_gen": 40.785, "psnr_blend": 25.751, "psnr_dup": 23.097, "region_gen": 40.785, "region_blend": 25.751, "region_dup": 23.097, "mean_abs_vs_A": 7.162, "mean_abs_vs_B": 13.897, "hud_err": 0.000, "errgrad": 1.4916, "blk": -0.02994, "pass": true},
+   {"t": 0.666667, "psnr_gen": 35.409, "psnr_blend": 24.521, "psnr_dup": 23.098, "region_gen": 35.409, "region_blend": 24.521, "region_dup": 23.098, "mean_abs_vs_A": 13.634, "mean_abs_vs_B": 7.102, "hud_err": 0.000, "errgrad": 3.4689, "blk": -0.15429, "pass": true},
+   {"t": 0.500000, "psnr_gen": 32.556, "psnr_blend": 24.617, "psnr_dup": 22.242, "region_gen": 32.556, "region_blend": 24.617, "region_dup": 22.242, "mean_abs_vs_A": 10.599, "mean_abs_vs_B": 10.778, "hud_err": 0.000, "errgrad": 3.9030, "blk": -0.03020, "pass": true}
+  ]}
+ ],
+ "blockiness": {"errgrad": 2.9545, "blk": -0.07148, "outputs": 3},
+ "failures": 0
+}

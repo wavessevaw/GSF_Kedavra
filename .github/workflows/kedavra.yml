@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [main]
+    branches: [main, release/silk-1.5.0]
     tags: ['v*']
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
@@ -179,7 +179,7 @@ jobs:
   # tag gets the zip and the notes added. Run by hand on main with a tag, it publishes that
   # release, creating the tag on the commit it ran on when the tag does not exist yet.
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') && github.ref == 'refs/heads/main')
+    if: github.ref == 'refs/heads/release/silk-1.5.0' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') && github.ref == 'refs/heads/main')
     needs: plugin
     runs-on: ubuntu-24.04
     permissions:
@@ -193,16 +193,17 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          TAG: ${{ github.ref == 'refs/heads/release/silk-1.5.0' && 'v1.5.0' || (github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name) }}
         run: |
           v=${TAG#v}
           cp out/KEDAVRA.zip "GSF-Kedavra-$v.zip"
+          cp "docs/releases/$TAG.md" "README-$v.md"
           sha256sum "GSF-Kedavra-$v.zip" > "GSF-Kedavra-$v.zip.sha256"
           if gh release view "$TAG" >/dev/null 2>&1; then
             # The release was created on github.com together with the tag: fill it in.
-            gh release upload "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" --clobber
+            gh release upload "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" --clobber
             gh release edit "$TAG" --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md"
           else
-            gh release create "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" \
+            gh release create "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" \
               --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md" --target "$GITHUB_SHA"
           fi

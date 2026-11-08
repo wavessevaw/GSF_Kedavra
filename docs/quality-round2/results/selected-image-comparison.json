@@ -1,0 +1,45 @@
+{
+  "method": "RGB MAE, 8x8 luminance SSIM, luminance gradient MAE; synthetic Vulkan correctness, not Deck validation",
+  "frames": [
+    {
+      "frame": "fast_pan_t333_gen.ppm",
+      "baseline": {
+        "mae": 0.01014835835375817,
+        "ssim_8x8": 0.9648222702666844,
+        "gradient_mae": 0.004278638489083265
+      },
+      "candidate": {
+        "mae": 0.0019429304534313724,
+        "ssim_8x8": 0.9870289539524454,
+        "gradient_mae": 0.0006971916018367615
+      }
+    },
+    {
+      "frame": "fast_pan_t500_gen.ppm",
+      "baseline": {
+        "mae": 0.01017472554125817,
+        "ssim_8x8": 0.9656992879585128,
+        "gradient_mae": 0.004250965683923122
+      },
+      "candidate": {
+        "mae": 0.0019652573529411765,
+        "ssim_8x8": 0.9881255163247483,
+        "gradient_mae": 0.0006655674809930847
+      }
+    },
+    {
+      "frame": "fast_pan_t667_gen.ppm",
+      "baseline": {
+        "mae": 0.009883598856209149,
+        "ssim_8x8": 0.9678707711481134,
+        "gradient_mae": 0.004171634538148687
+      },
+      "candidate": {
+        "mae": 0.0017151373570261435,
+        "ssim_8x8": 0.9899999138056491,
+        "gradient_mae": 0.0006074342601788813
+      }
+    }
+  ],
+  "excluded": []
+}

@@ -1,0 +1,10 @@
+{
+ "device": "llvmpipe (LLVM 19.1.7, 256 bits)",
+ "driver": "llvmpipe Mesa 25.0.7-2+deb13u1 (LLVM 19.1.7)",
+ "size": [1280, 800],
+ "scenes": [
+ ],
+ "hard": [
+  {"scene": "h_turn64", "mode": 3, "psnr": 24.687, "psnr_worst": 23.168, "errgrad": 7.4546, "blk": 0.01088, "badblk_pct": 5.2961, "badblk_max": 5.9295, "temporal": 8.5926, "lineflk": 15.0452, "sharpflk_pct": 5.183}
+ ]
+}

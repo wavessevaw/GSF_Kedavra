@@ -200,7 +200,13 @@ void main()
 #ifdef KFG_EXPERIMENT_NO_BLUR
 	const float blur = 0.0;
 #else
-	const float blur = clamp((length(sel.xy) - 10.0) * 0.08, 0.0, 4.0);  // analysis pixels
+	float blur = clamp((length(sel.xy) - 10.0) * 0.08, 0.0, 4.0);  // analysis pixels
+#endif
+// Keep fast, mutually matching samples sharp only inside a coherent motion region.
+// Ambiguous motion, occlusions and noise retain the existing reconstruction.
+#ifndef KFG_EXPERIMENT_NO_BLUR
+	if (w_b > 0.1 && w_b < 0.9 && sel.w < 0.005 && spread2 < 1.0 && dot(sel.xy, sel.xy) > 1024.0)
+		blur *= smoothstep(0.005, 0.03, dot(abs(ca.rgb - cb.rgb), vec3(1.0 / 3.0)));
 #endif
 	if (blur > 0.25 && !still) {
 		vec2 o = normalize(v) * (0.5 * blur) * sc;
