@@ -48,6 +48,8 @@ layout(local_size_x = 8, local_size_y = 8) in;
 
 #define S_CAS 1
 #define S_DLS 2
+#define S_DETAIL 3
+#define S_RCAS 4
 
 const vec3 LUMA709 = vec3(0.2126, 0.7152, 0.0722);
 
@@ -398,6 +400,59 @@ vec3 dls(float sharpen, float denoise)
 	return clamp(x + (acc - lx), 0.0, 1.0);
 }
 
+// Spatial Detail Reconstruction, SDR only. Nine samples, no history, one dispatch.
+// A directional high-pass acts across coherent edges. Local channel bounds prevent
+// new extrema; a shared RGB delta preserves chroma instead of clipping channels apart.
+// Low contrast and inconsistent gradients reduce gain conservatively (not a denoiser).
+vec3 detail(float strength, vec3 e)
+{
+	vec3 a = px(ivec2(-1, -1)), b = px(ivec2(0, -1)), c = px(ivec2(1, -1));
+	vec3 d = px(ivec2(-1, 0)), f = px(ivec2(1, 0));
+	vec3 g = px(ivec2(-1, 1)), h = px(ivec2(0, 1)), i = px(ivec2(1, 1));
+	float la = dot(a, LUMA709), lb = dot(b, LUMA709), lc = dot(c, LUMA709);
+	float ld = dot(d, LUMA709), le = dot(e, LUMA709), lf = dot(f, LUMA709);
+	float lg = dot(g, LUMA709), lh = dot(h, LUMA709), li = dot(i, LUMA709);
+	vec3 gx = vec3(lc-la, lf-ld, li-lg);
+	vec3 gy = vec3(lg-la, lh-lb, li-lc);
+	vec2 gradient = vec2(dot(gx, vec3(1,2,1)), dot(gy, vec3(1,2,1)));
+	float activity = dot(abs(gx) + abs(gy), vec3(1,2,1));
+	float coherence = (abs(gradient.x) + abs(gradient.y)) / max(activity, 1e-5);
+	vec2 direction = gradient * gradient;
+	direction /= max(direction.x + direction.y, 1e-5);
+	float residual = dot(vec2(le - 0.5*(ld+lf), le - 0.5*(lb+lh)), direction);
+	float lo = min(le, min(min(lb, ld), min(lf, lh)));
+	float hi = max(le, max(max(lb, ld), max(lf, lh)));
+	float range = hi - lo;
+	float gain = strength * coherence * coherence * smoothstep(0.025, 0.10, range);
+	float delta = clamp(gain * residual, -0.25 * range, 0.25 * range);
+	vec3 mn = min(e, min(min(b, d), min(f, h)));
+	vec3 mx = max(e, max(max(b, d), max(f, h)));
+	vec3 lower = mn - e, upper = mx - e;
+	delta = clamp(delta, max(max(lower.r, lower.g), lower.b), min(min(upper.r, upper.g), upper.b));
+	return e + delta;
+}
+
+#ifdef KFG_POST_RESEARCH
+// Adapted AMD FSR1 RCAS (MIT, THIRD_PARTY.md). Research comparator only.
+// Denoise enabled; strength linearly scales the lobe, zero is identity. Exact FP32
+// division replaces upstream reciprocal approximations; guards handle flat black/white.
+vec3 rcas(float strength)
+{
+	vec3 b = px(ivec2(0,-1)), d = px(ivec2(-1,0)), e = px(ivec2(0));
+	vec3 f = px(ivec2(1,0)), h = px(ivec2(0,1));
+	vec3 mn = min(min(b,d), min(f,h)), mx = max(max(b,d), max(f,h));
+	vec3 lobeRGB = max(-min(mn,e) / max(4.0*mx, vec3(1e-6)),
+		(1.0-max(mx,e)) / min(4.0*mn-4.0, vec3(-1e-6)));
+	float lobe = max(-0.1875, min(max(max(lobeRGB.r,lobeRGB.g),lobeRGB.b),0.0)) * strength;
+	const vec3 luma = vec3(0.5,1.0,0.5);
+	float lb=dot(b,luma), ld=dot(d,luma), le=dot(e,luma), lf=dot(f,luma), lh=dot(h,luma);
+	float span = max(le,max(max(lb,ld),max(lf,lh))) - min(le,min(min(lb,ld),min(lf,lh)));
+	float noise = clamp(abs(0.25*(lb+ld+lf+lh)-le)/max(span,1e-6),0.0,1.0);
+	lobe *= 1.0 - 0.5*noise;
+	return (e + lobe*(b+d+f+h)) / (1.0+4.0*lobe);
+}
+#endif
+
 // -------------------------------------------------------------------------------------- FXAA
 //
 // Edge-directed antialiasing in the spirit of FXAA 3.11 "quality": local contrast test, edge
@@ -525,15 +580,20 @@ void main()
 		return;
 	g_rcp = 1.0 / vec2(u_dstSize);
 	g_uv = (vec2(p) + 0.5) * g_rcp;
-	float alpha = tap(g_uv).a;
+	vec4 center = tap(g_uv);
 	vec3 c;
 	if (u_level == STAGE_GRADE)
 		c = grade(p, u_flags);
-	else if (u_level == STAGE_SHARPEN)
-		c = u_flags == S_DLS ? dls(u_lambda, u_cutThreshold) : cas(u_lambda);
+	else if (u_level == STAGE_SHARPEN) {
+		if (u_flags == S_DETAIL) c = detail(u_lambda, center.rgb);
+#ifdef KFG_POST_RESEARCH
+		else if (u_flags == S_RCAS) c = rcas(u_lambda);
+#endif
+		else c = u_flags == S_DLS ? dls(u_lambda, u_cutThreshold) : cas(u_lambda);
+	}
 	else if (u_level == STAGE_FXAA)
 		c = fxaa();
 	else
 		c = finish(p, u_flags);
-	imageStore(dst, p, vec4(c, alpha));
+	imageStore(dst, p, vec4(c, center.a));
 }

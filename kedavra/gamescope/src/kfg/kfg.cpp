@@ -717,6 +717,7 @@ namespace kfg
 		const std::string sSpec = CvarCopy( g_sPost );
 		if ( sSpec == s.sPostSpec )
 			return;
+		const bool bWasAfter = kfg_post_after_generation( &s.post );
 		s.sPostSpec = sSpec;
 		char szErr[ 128 ];
 		if ( kfg_post_parse( sSpec.c_str(), &s.post, szErr, sizeof( szErr ) ) != 0 )
@@ -729,6 +730,8 @@ namespace kfg
 			s.sPostError.clear();
 			kfg_log.infof( "filters: %s", sSpec.empty() ? "off" : sSpec.c_str() );
 		}
+		if ( bWasAfter != bool( kfg_post_after_generation( &s.post ) ) )
+			ResetHistory( s, "post placement change" ); // Never mix prefiltered and raw ring frames.
 		if ( !kfg_post_active( &s.post ) )
 		{
 			// Off: free the images (the SMAA tables are small and stay).
@@ -805,12 +808,7 @@ namespace kfg
 	// scRGB is linear with values above 1.0: no filter is made for it, shown unfiltered.
 	static kfg_post_cfg PostFor( const kfg_post_cfg &cfg, int nTransfer )
 	{
-		kfg_post_cfg c = cfg;
-		if ( nTransfer == KFG_TRANSFER_SCRGB )
-			c = kfg_post_cfg{};
-		else if ( nTransfer == KFG_TRANSFER_PQ )
-			c.grade = 0;
-		return c;
+		return kfg_post_for_transfer( cfg, nTransfer );
 	}
 
 	// Filters on layer 0. With pInto the result is copied there (a ring frame: the game's own
@@ -821,7 +819,8 @@ namespace kfg
 		const uint32_t uWidth = layer0.tex->width(), uHeight = layer0.tex->height();
 		const int nTransfer = SourceTransfer( layer0 );
 		const kfg_post_cfg post = PostFor( s.post, nTransfer );
-		s.bPostLimited = nTransfer != KFG_TRANSFER_SDR && post.grade != s.post.grade;
+		s.bPostLimited = nTransfer != KFG_TRANSFER_SDR &&
+			( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 		if ( !kfg_post_active( &post ) )
 		{
 			s.ulPostSkipped++;
@@ -1114,6 +1113,8 @@ namespace kfg
 		{
 			const int nTransfer = pFrameInfo->layers.count() ? SourceTransfer( pFrameInfo->layers.get( 0 ) ) : -1;
 			const kfg_post_cfg post = PostFor( s.post, nTransfer );
+			s.bPostLimited = nTransfer != KFG_TRANSFER_SDR &&
+				( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 			s.bPostPending = nTransfer >= 0 && kfg_post_active( &post );
 			if ( !s.bPostPending )
 				s.ulPostSkipped++;  // scRGB, kfg_hdr off or an unusual format: shown unfiltered
@@ -1281,7 +1282,7 @@ namespace kfg
 			// With filters on, the game's frame is filtered once on its way into the ring: real
 			// and generated frames then come out filtered, and the filters cost once per game
 			// frame instead of once per displayed frame (x3.75: a quarter as often).
-			if ( !s.bPostPending || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
+			if ( !s.bPostPending || kfg_post_after_generation( &s.post ) || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
 				RecordCopy( pCmd, layer0.tex, cur.pColor.get() );
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
@@ -1349,7 +1350,7 @@ namespace kfg
 		layer0.tex = pShow;
 		s.pLastShown = pShow;
 		s.ulApplied++;
-		s.bShownFiltered = s.bPostPending;  // ring frames and outputs made from them are filtered
+		s.bShownFiltered = s.bPostPending && !kfg_post_after_generation( &s.post );
 	}
 
 	void RecordComposite( CVulkanCmdBuffer *pCmd, FrameInfo_t *pFrameInfo )

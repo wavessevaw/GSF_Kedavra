@@ -5,17 +5,11 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [main, release/silk-1.5.0]
-    tags: ['v*']
+    branches: [research/detail-reconstruction]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Publish the plugin as release vX.Y.Z (the tag is created on this commit if missing; main only); empty = build only'
-        required: false
-        default: ''
 permissions:
   contents: read
 jobs:
@@ -28,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
       - name: Build
-        run: make -C kedavra all
+        run: make -C kedavra all detail-lab
       - name: Scheduler unit tests and model stress matrix
         run: make -C kedavra test-pacing test-sched
       - name: Engine correctness on lavapipe
@@ -45,7 +39,9 @@ jobs:
       - name: Steam Deck bench bundle (engine on RADV)
         run: |
           mkdir -p deck-bench
-          cp kedavra/build/kfg_vktest kedavra/build/kfg_posttest kedavra/build/*.spv deck-bench/
+          cp kedavra/build/kfg_vktest kedavra/build/kfg_posttest kedavra/build/kfg_detailtest kedavra/build/*.spv deck-bench/
+          cp -r kedavra/build/research deck-bench/
+          cp kedavra/tools/detail/bench_detail.py deck-bench/
       - uses: actions/upload-artifact@v4
         with:
           name: kedavra-deck-bench
@@ -152,7 +148,7 @@ jobs:
           $R/bin/gamescopectl --help >/dev/null 2>&1 || true
 
   plugin:
-    needs: [model-and-engine, gamescope, runtime-on-older-glibc]
+    needs: [model-and-engine, gamescope, runtime-on-older-glibc, decky]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -167,43 +163,47 @@ jobs:
         with:
           name: kedavra-deck-bench
           path: deck-bench
-      - name: Plugin zip with runtime and bench
-        run: sh kedavra/decky/package.sh "$PWD/KEDAVRA.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+      - name: Full install candidate with runtime, research bench and rollback instructions
+        run: |
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.1.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.5.1-detail.1.zip > GSF-Kedavra-1.5.1-detail.1.zip.sha256
+          cp docs/detail/README.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
-          name: KEDAVRA-plugin
-          path: KEDAVRA.zip
+          name: GSF-Kedavra-Detail-Candidate
+          path: |
+            GSF-Kedavra-1.5.1-detail.1.zip
+            GSF-Kedavra-1.5.1-detail.1.zip.sha256
+            README-Detail-Candidate.md
 
-  # A pushed version tag (v1.0.0) publishes the plugin zip built above as a GitHub release,
-  # with the notes in docs/releases/<tag>.md. A release already made on github.com with a new
-  # tag gets the zip and the notes added. Run by hand on main with a tag, it publishes that
-  # release, creating the tag on the commit it ran on when the tag does not exist yet.
-  release:
-    if: github.ref == 'refs/heads/release/silk-1.5.0' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') && github.ref == 'refs/heads/main')
-    needs: plugin
+  detail-lab:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: KEDAVRA-plugin
-          path: out
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref == 'refs/heads/release/silk-1.5.0' && 'v1.5.0' || (github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name) }}
+      - name: Lab dependencies
         run: |
-          v=${TAG#v}
-          cp out/KEDAVRA.zip "GSF-Kedavra-$v.zip"
-          cp "docs/releases/$TAG.md" "README-$v.md"
-          sha256sum "GSF-Kedavra-$v.zip" > "GSF-Kedavra-$v.zip.sha256"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # The release was created on github.com together with the tag: fill it in.
-            gh release upload "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" --clobber
-            gh release edit "$TAG" --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md"
-          else
-            gh release create "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" \
-              --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md" --target "$GITHUB_SHA"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools vulkan-validationlayers python3-numpy python3-scipy python3-pil ffmpeg
+      - name: Build and validate shaders
+        run: |
+          make -C kedavra all detail-lab
+          for f in kedavra/build/*.spv kedavra/build/research/*.spv; do
+            spirv-val --target-env vulkan1.1 --scalar-block-layout "$f"
+          done
+      - name: Vulkan validation and reproducible comparison
+        run: |
+          export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
+          KFG_VALIDATION=1 kedavra/build/kfg_posttest --spv kedavra/build 2>&1 | tee validation.log
+          ! grep -E 'Validation Error|VUID-' validation.log
+          python3 kedavra/tools/detail/fetch_references.py /tmp/detail-references
+          mkdir -p /tmp/detail-fg
+          KFG_HARD_OUT=/tmp/detail-fg KFG_HARD_X2=1 KFG_DETAIL_SEQUENCE_OUT=/tmp/detail-fg kedavra/build/kfg_vktest --spv kedavra/build --size 320x200 --hard --json hard-engine.json
+          python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv kedavra/build/research --references /tmp/detail-references --fg /tmp/detail-fg --out detail-results --bench 100
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: detail-comparison-software-vulkan
+          path: |
+            detail-results
+            validation.log
+            hard-engine.json
