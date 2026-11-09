@@ -612,7 +612,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--bench") && i + 1 < argc) bench = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--bench-size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &bw, &bh);
 		else {
-			fprintf(stderr, "usage: kfg_posttest [--spv DIR] [--bench N] [--bench-size WxH]\n");
+			fprintf(stderr, "usage: kfg_posttest [--spv DIR] [--bench N] [--bench-size WxH] [--batch FILE]\n");
 			return 2;
 		}
 	}

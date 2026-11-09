@@ -105,3 +105,18 @@ Decision: retain as an explicitly opt-in research candidate for hardware/visual
 review. Do not replace CAS/DLS, enable by default, or publish Stable. The current
 evidence demonstrates bounded edges and noise control, not universal superiority
 or satisfaction of every acceptance criterion.
+
+## Regression evidence
+
+340 CAS/DLS outputs (170 identical inputs per mode) were compared byte-for-byte
+against the unmodified v1.5.0 SPIR-V: **zero mismatches**. The warp shader, motion
+estimation code, Vulkan driver and scheduler are unchanged. The 29 Decky backend
+tests pass locally. New post tests verify strict parsing, single-pass selection,
+zero-dispatch identity, flat fields, hard-edge identity, soft-edge sharpening,
+alpha preservation and SDR/PQ/scRGB policy selection. The comparison suite also
+checks output alpha, exact off bypass and local-extrema bounds on every Detail output.
+
+CI builds Gamescope and checks the bundled runtime against older glibc, validates
+SPIR-V and Vulkan usage, runs normal/low-base engine tests, the scheduler model and
+the image lab. CI run outcomes and artifact links are recorded in the PR. These
+checks cover software correctness, not an actual SteamOS display session.

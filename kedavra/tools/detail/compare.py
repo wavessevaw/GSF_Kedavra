@@ -154,6 +154,8 @@ def main():
                 assert np.all(rgba[..., 3] == 255), (name, mode, "alpha changed")
                 out = rgba[..., :3]; outputs[name][mode] = out
                 results[name][mode] = metrics(src, out, ref)
+                if mode.startswith("detail"):
+                    assert results[name][mode]["overshoot_max_codes"] <= 1, (name, mode, "new local extrema")
                 Image.fromarray(out).save(folder/f"{mode}.png")
             if show: preview.append(f"<td>{mode}<br><a href='{name}/{mode}.png'><img src='{name}/{mode}.png'></a></td>")
         assert np.array_equal(src, outputs[name]["off"]), (name, "off is not identity")
