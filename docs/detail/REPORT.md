@@ -120,3 +120,17 @@ CI builds Gamescope and checks the bundled runtime against older glibc, validate
 SPIR-V and Vulkan usage, runs normal/low-base engine tests, the scheduler model and
 the image lab. CI run outcomes and artifact links are recorded in the PR. These
 checks cover software correctness, not an actual SteamOS display session.
+
+## Setup controls update (1.5.1-detail.2)
+
+The user-facing name is **Kedavra Focus**. Setup now includes a live switch and a
+0–100% strength slider, initially 50%. The backend changes only `kfg_post`, waits
+for engine acknowledgement, reports errors/timeouts and preserves other effects.
+A previous CAS/DLS selection is restored on disable within the plugin session.
+Strength is saved; the switch follows actual compositor state and is not forced
+on after restart or after another controller selects a different filter.
+
+All 35 backend tests pass, including live changes, zero, restoration, external
+controller changes, rejected commands, invalid strengths and stale/timeout paths.
+The shader and runtime algorithms are unchanged from the validated first candidate;
+all image-quality and hardware limitations above still apply.

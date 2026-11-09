@@ -1,6 +1,6 @@
 # Kedavra Detail Reconstruction — research candidate
 
-**Version: 1.5.1-detail.1, based on the published GSF Kedavra 1.5.0.**
+**Version: 1.5.1-detail.2, based on the published GSF Kedavra 1.5.0.**
 This is an opt-in test candidate, not a Stable release. No Steam Deck LCD/OLED was
 available during development. Hardware GPU budget, frame pacing, latency and
 perceptual acceptance remain open. Do not infer FSR 4 reconstruction quality.
@@ -35,12 +35,19 @@ including negative and above-one values. No new SDR clamp is applied to HDR.
 1. Keep the official [1.5.0 ZIP](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.5.0)
    available for rollback. Preserve your current settings.
 2. Download the candidate ZIP and its `.sha256` file from the linked CI run.
-   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.1.zip.sha256` in that directory.
+   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.2.zip.sha256` in that directory.
 3. In Decky Loader developer settings, install the ZIP. It contains the **KEDAVRA**
    plugin, complete bundled Gamescope runtime, shaders and standalone test tools.
 4. Open KEDAVRA, use its existing runtime install/update action, then reboot.
    Check Diagnostics to confirm the installed runtime matches the bundled commit.
-5. In the game session, use the existing control mechanism, for example:
+5. Open **Setup → Kedavra Focus**. The switch and **Processing strength** slider
+   (0–100%, initially 50%) apply live without restarting the game. Strength is saved;
+   the switch reflects the running compositor and starts off after Gamescope restarts.
+   Focus works with frame generation off or on. HDR sources bypass the effect.
+   During this plugin session, disabling Focus restores the previous CAS/DLS selection
+   while preserving other effects. Changes made by another controller are not repeatedly
+   overridden. Failed or unconfirmed commands are reported instead of showing success.
+6. The existing command-line mechanism remains available, for example:
 
    ```sh
    /var/lib/kedavra/runtime/bin/gamescopectl kfg_post 'detail=0.5'
@@ -50,8 +57,7 @@ including negative and above-one values. No new SDR clamp is applied to HDR.
    `XDG_RUNTIME_DIR` and `GAMESCOPE_WAYLAND_DISPLAY`; do not target a different compositor.
    A separate controller such as GFG may overwrite `kfg_post` when applying a preset.
 
-There is no new slider or persistent preset. Test with FG off, ×2 and ×3 using the
-existing FG controls. Start at 0.5. For an already sharp external upscaler output,
+Test with FG off, ×2 and ×3 using the existing FG controls. Start at 50%. For an already sharp external upscaler output,
 leave Detail off. No attempt is made to detect FSR or OptiScaler from pixels.
 
 Disable all post effects immediately with:

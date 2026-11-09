@@ -165,15 +165,15 @@ jobs:
           path: deck-bench
       - name: Full install candidate with runtime, research bench and rollback instructions
         run: |
-          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.1.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
-          sha256sum GSF-Kedavra-1.5.1-detail.1.zip > GSF-Kedavra-1.5.1-detail.1.zip.sha256
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.2.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.5.1-detail.2.zip > GSF-Kedavra-1.5.1-detail.2.zip.sha256
           cp docs/detail/README.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
           name: GSF-Kedavra-Detail-Candidate
           path: |
-            GSF-Kedavra-1.5.1-detail.1.zip
-            GSF-Kedavra-1.5.1-detail.1.zip.sha256
+            GSF-Kedavra-1.5.1-detail.2.zip
+            GSF-Kedavra-1.5.1-detail.2.zip.sha256
             README-Detail-Candidate.md
 
   detail-lab:

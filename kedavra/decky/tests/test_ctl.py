@@ -132,6 +132,64 @@ class ControlTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.ctl.apply_options({"x375": True, "hdr": True})
 
+    def focus_runtime(self, spec="", reject=False):
+        state = {"fresh": True, "post": spec, "post_error": ""}
+        self.ctl.status = lambda: dict(state)
+        self.ctl.sleep = lambda _: None
+        def command(*args):
+            self.rec.calls.append(list(args))
+            state["post"] = args[1]
+            state["post_error"] = "bad token" if reject and "detail=" in args[1] else ""
+        self.ctl._ctl = command
+        return state
+
+    def test_focus_live_strength_and_restore_legacy_sharpener(self):
+        state = self.focus_runtime("vibrance,cas=0.4,smaa,vignette")
+        self.assertTrue(self.ctl.set_detail(True, 0.5)["detail"])
+        self.assertEqual(state["post"], "vibrance,smaa,vignette,detail=0.500")
+        self.ctl.set_detail(True, 0.75)
+        self.assertTrue(state["post"].endswith("detail=0.750"))
+        self.assertFalse(self.ctl.set_detail(False, 0.75)["detail"])
+        self.assertEqual(state["post"], "vibrance,smaa,vignette,cas=0.4")
+        self.assertTrue(all(c[0] == "kfg_post" for c in self.rec.calls))
+
+    def test_focus_zero_disables_without_disabling_other_effects(self):
+        state = self.focus_runtime("vignette")
+        self.ctl.set_detail(True, 0.5)
+        self.assertFalse(self.ctl.set_detail(True, 0)["detail"])
+        self.assertEqual(state["post"], "vignette")
+
+    def test_focus_does_not_replace_external_cas_on_disable(self):
+        state = self.focus_runtime()
+        self.ctl.set_detail(True, 0.5)
+        state["post"] = "dls=0.2:0.17,fxaa"
+        before = len(self.rec.calls)
+        self.ctl.set_detail(False, 0.5)
+        self.assertEqual(len(self.rec.calls), before)
+
+    def test_focus_rejection_restores_previous_effects(self):
+        state = self.focus_runtime("cas=0.3", reject=True)
+        with self.assertRaises(RuntimeError):
+            self.ctl.set_detail(True, 0.5)
+        self.assertEqual(state["post"], "cas=0.3")
+
+    def test_focus_timeout_is_not_success(self):
+        state = self.focus_runtime("fxaa")
+        self.ctl._ctl = lambda *args: self.rec.calls.append(list(args))
+        with self.assertRaises(RuntimeError):
+            self.ctl.set_detail(True, 0.5)
+        self.assertEqual(self.rec.calls[-1], ["kfg_post", "fxaa"])
+
+    def test_focus_bad_strength_and_stale_engine(self):
+        self.focus_runtime()
+        for v in [-1, 1.1, float("nan"), float("inf")]:
+            with self.assertRaises(ValueError):
+                self.ctl.set_detail(True, v)
+        self.ctl.status = lambda: {"fresh": False}
+        with self.assertRaises(RuntimeError):
+            self.ctl.set_detail(True, 0.5)
+        self.assertEqual(self.rec.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

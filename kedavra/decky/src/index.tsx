@@ -3,13 +3,14 @@ import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1-detail.2';
 
 type Summary = {pass?: boolean; p95_ms?: number; p99_ms?: number; missed_pct?: number; rows?: number; checks?: Record<string, boolean>};
 type Report = {trace: string; report: string; ok: boolean; log: string; summary?: Summary};
 type Capture = {path: string; started: number; label: string; elapsed_s: number} | null;
 type Live = {fps: number | null; real: number | null; pace: number | null; gen_share: number | null; unsupported?: number};
 type Status = {
+  detail?: boolean; detail_strength?: number; post?: string; post_error?: string; post_hdr_limited?: boolean;
   engine: 'running' | 'stale' | 'absent'; fresh: boolean; message?: string; capture: Capture; live?: Live;
   multiplier?: number; state?: string; refresh_ns?: number; width?: number; height?: number;
   steam_ui?: boolean; sources?: number; real?: number; gen?: number; repeat?: number; skip?: number; resync?: number; degrade?: number;
@@ -31,7 +32,8 @@ type Bench = {ok: boolean; correct?: boolean; analysis_ms?: number; two_outputs_
 
 const rpc = {
   status: callable<[], Status>('get_status'),
-  settings: callable<[], {hud: boolean; base_fps: number; x375: boolean; hdr: boolean}>('get_settings'),
+  settings: callable<[], {hud: boolean; base_fps: number; x375: boolean; hdr: boolean; detail_strength: number}>('get_settings'),
+  setDetail: callable<[boolean, number], {detail: boolean; detail_strength: number; post: string}>('set_detail'),
   setOptions: callable<[boolean, boolean], {x375: boolean; hdr: boolean}>('set_options'),
   setMode: callable<[Mode, number], {mode: Mode; base_fps: number}>('set_mode'),
   setHud: callable<[boolean], {hud: boolean}>('set_hud'),
@@ -143,6 +145,8 @@ function Content() {
   const [hud, setHud] = useState(true);
   const [x375, setX375] = useState(false);
   const [hdr, setHdr] = useState(true);
+  const [detailStrength, setDetailStrength] = useState(50);
+  const detailTimer = useRef<number | undefined>(undefined);
   const [base, setBase] = useState(30);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -155,13 +159,18 @@ function Content() {
   const lock = useRef(false);
   const baseTimer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setBase(r.base_fps); setX375(r.x375); setHdr(r.hdr);}).catch(() => {});}, []);
+  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setBase(r.base_fps); setX375(r.x375); setHdr(r.hdr); setDetailStrength(Math.round((r.detail_strength ?? 0.5) * 100));}).catch(() => {});}, []);
+  useEffect(() => () => window.clearTimeout(detailTimer.current), []);
   const refreshDiag = async () => {try {setDiag(await rpc.diagnose());} catch (e) {setMessage(String(e));}};
   useEffect(() => {void refreshDiag();}, []);
   useEffect(() => {
     let gone = false;
     const refresh = async () => {
-      try {const s = await rpc.status(); if (!gone) setStatus(s);}
+      try {const s = await rpc.status(); if (!gone) {
+        setStatus(s);
+        if (s.detail && s.detail_strength !== undefined && detailTimer.current === undefined && !lock.current)
+          setDetailStrength(Math.round(s.detail_strength * 100));
+      }}
       catch (e) {if (!gone) setMessage(String(e));}
     };
     void refresh();
@@ -244,8 +253,33 @@ function Content() {
       : (r.hdr ? 'HDR games get generation too' : 'HDR games pass through without generation');
   });
 
+  const applyDetail = (on: boolean, strength: number) => void act(async () => {
+    const r = await rpc.setDetail(on, strength / 100);
+    setStatus(s => s ? {...s, detail: r.detail, post: r.post} : s);
+    return r.detail ? `Kedavra Focus: ${strength}%` : 'Kedavra Focus off';
+  });
+  const onDetailStrength = (v: number) => {
+    setDetailStrength(v);
+    window.clearTimeout(detailTimer.current);
+    detailTimer.current = window.setTimeout(() => {detailTimer.current = undefined; applyDetail(!!status?.detail, v);}, 400);
+  };
+
   if (view === 'setup') return <PanelSection>
     <Back onClick={() => setView('main')} title="Setup"/>
+    <PanelSectionRow><div style={caps}>IMAGE CLARITY</div></PanelSectionRow>
+    <PanelSectionRow><div className="gsf-green" style={{...card, padding: `2px ${INSET}px`}}>
+      <ToggleField label="Kedavra Focus" description="Sharper soft contours with controlled halos. Applies live, with or without frame generation."
+        checked={!!status?.detail} disabled={busy || !running} bottomSeparator="standard"
+        onChange={v => {window.clearTimeout(detailTimer.current); detailTimer.current = undefined; const strength = v && detailStrength === 0 ? 50 : detailStrength;
+          setDetailStrength(strength); applyDetail(v, strength);}}/>
+      <SliderField label="Processing strength" value={detailStrength} min={0} max={100} step={5} showValue
+        disabled={busy || !running} bottomSeparator="none" onChange={onDetailStrength}/>
+    </div></PanelSectionRow>
+    <PanelSectionRow><div style={{fontSize: 11, color: C.muted, lineHeight: 1.4}}>
+      {status?.post_error ? status.post_error : status?.detail && status?.post_hdr_limited
+        ? 'Enabled, but bypassed for this HDR source.' : 'SDR only. 50% recommended; 0% disables Focus. Strength is saved; Focus starts off after Gamescope restarts.'}
+    </div></PanelSectionRow>
+    <div style={gap}/>
     <PanelSectionRow><DialogButton onClick={() => setShowChecks(!showChecks)} className="gsf-row" style={{...card, ...flat, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left'}}>
       <span style={{width: 30, height: 30, borderRadius: 15, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: allOk ? C.greenBg : C.redBg, color: allOk ? C.greenText : C.red, fontWeight: 900}}>{allOk ? '✓' : '!'}</span>
