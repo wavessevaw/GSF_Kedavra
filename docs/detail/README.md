@@ -1,6 +1,6 @@
 # Kedavra Detail Reconstruction — research candidate
 
-**Version: 1.5.1-detail.3, based on the published GSF Kedavra 1.5.0.**
+**Version: 1.5.1-detail.4, based on the published GSF Kedavra 1.5.0.**
 This is an opt-in test candidate, not a Stable release. No Steam Deck LCD/OLED was
 available during development. Hardware GPU budget, frame pacing, latency and
 perceptual acceptance remain open. Do not infer FSR 4 reconstruction quality.
@@ -12,15 +12,16 @@ perceptual acceptance remain open. Do not infer FSR 4 reconstruction quality.
 default remains off. CAS and DLS remain available with their existing behavior.
 Only the last sharpening token is selected, so Detail does not stack with CAS/DLS.
 
-The filter uses nine neighboring samples, directional luminance gradients, a
-conservative low-contrast gate and shared RGB correction bounded by local channel
-extrema. It sharpens coherent soft transitions while limiting halos and noise
-amplification. It cannot recover missing texture or fix frame-generation geometry.
-CAS can retain more very fine texture; Detail is not a universal replacement.
-The Edge Enhancement experiments were rejected: stronger protection against
-existing halos also removed too much useful correction. The installed filter
-retains Detail with a colour-channel bug fix. Existing ringing can still widen;
-leave Focus off on inputs with visible halos. See [measured limitations](EDGE-STATUS.md).
+Focus now uses a bounded CAS-derived edge response: directional weighting, smooth
+reduction on high-contrast sharp boundaries, local ringing attenuation and per-channel
+limits. The selected balanced configuration replaces the .3 Detail shader. It uses
+nine samples and one dispatch, with no new buffers. Controlled excursions of up to
+0.025 encoded SDR units (approximately 6 code values) are allowed; zero ringing is
+not promised. Noise can increase, although less than the existing CAS in the measured
+control. Use lower strength or disable Focus on noisy or already oversharpened inputs.
+
+See [the balanced candidate report](BALANCED.md) for comparisons and trade-offs.
+Earlier EDGE-STATUS.md describes the historical .3 rejection, not this algorithm.
 
 Detail chains operate on each displayed real or generated frame, including both
 intermediate phases of ×3. They use the existing post images and dispatch path.
@@ -39,7 +40,7 @@ including negative and above-one values. No new SDR clamp is applied to HDR.
 1. Keep the official [1.5.0 ZIP](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.5.0)
    available for rollback. Preserve your current settings.
 2. Download the candidate ZIP and its `.sha256` file from the linked CI run.
-   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.3.zip.sha256` in that directory.
+   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.4.zip.sha256` in that directory.
 3. In Decky Loader developer settings, install the ZIP. It contains the **KEDAVRA**
    plugin, complete bundled Gamescope runtime, shaders and standalone test tools.
 4. Open KEDAVRA, use its existing runtime install/update action, then reboot.

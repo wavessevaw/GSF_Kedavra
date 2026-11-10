@@ -165,15 +165,15 @@ jobs:
           path: deck-bench
       - name: Full install candidate with runtime, research bench and rollback instructions
         run: |
-          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.3.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
-          sha256sum GSF-Kedavra-1.5.1-detail.3.zip > GSF-Kedavra-1.5.1-detail.3.zip.sha256
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.4.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.5.1-detail.4.zip > GSF-Kedavra-1.5.1-detail.4.zip.sha256
           cp docs/detail/README.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
           name: GSF-Kedavra-Detail-Candidate
           path: |
-            GSF-Kedavra-1.5.1-detail.3.zip
-            GSF-Kedavra-1.5.1-detail.3.zip.sha256
+            GSF-Kedavra-1.5.1-detail.4.zip
+            GSF-Kedavra-1.5.1-detail.4.zip.sha256
             README-Detail-Candidate.md
 
   detail-lab:
@@ -199,7 +199,7 @@ jobs:
           mkdir -p /tmp/detail-fg
           KFG_HARD_OUT=/tmp/detail-fg KFG_HARD_X2=1 KFG_DETAIL_SEQUENCE_OUT=/tmp/detail-fg kedavra/build/kfg_vktest --spv kedavra/build --size 320x200 --hard --json hard-engine.json
           python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv kedavra/build/research --references /tmp/detail-references --fg /tmp/detail-fg --out detail-results --bench 100
-      - name: Compare frozen Detail 2 and rejected Edge experiments
+      - name: Compare frozen Detail 2 and practical Edge configurations
         run: |
           export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
           # Retrieve the exact published candidate shader, never main or a moving branch.
@@ -211,14 +211,20 @@ jobs:
           glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders /tmp/old-post.comp -o /tmp/old-spv/kfg_post.spv
           glslangValidator -V --target-env vulkan1.1 -DKFG_POST_RESEARCH=1 -Ikedavra/shaders /tmp/old-post.comp -o /tmp/old-research/kfg_post.spv
           python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv /tmp/old-research --references /tmp/detail-references --fg /tmp/detail-fg --out /tmp/old-results
+          git fetch --depth 1 origin 32579d817affb9ebb8085eebe32371c55e915c28
+          git show 32579d817affb9ebb8085eebe32371c55e915c28:kedavra/shaders/kfg_post.comp > /tmp/detail3.comp
+          mkdir -p /tmp/detail3-spv
+          cp kedavra/build/*.spv /tmp/detail3-spv/
+          glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders /tmp/detail3.comp -o /tmp/detail3-spv/kfg_post.spv
+          python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv /tmp/detail3-spv --out /tmp/edge-detail3
           python3 kedavra/tools/detail/edge_variants.py --shader kedavra/shaders/kfg_post.comp --spv kedavra/build --out /tmp/edge-variants
           python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv kedavra/build --out /tmp/edge-fixed
-          for variant in profile3 outer11 width11; do
+          for variant in conservative balanced strong; do
             spirv-val --target-env vulkan1.1 --scalar-block-layout /tmp/edge-variants/$variant/kfg_post.spv
             python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv /tmp/edge-variants/$variant --out /tmp/edge-$variant
           done
-          python3 kedavra/tools/detail/probe_profiles.py --exe kedavra/build/kfg_posttest --spv kedavra/build --variant old=/tmp/old-spv --variant fixed=kedavra/build --variant profile3=/tmp/edge-variants/profile3 --variant outer11=/tmp/edge-variants/outer11 --variant width11=/tmp/edge-variants/width11 --out /tmp/edge-controls
-          python3 kedavra/tools/detail/edge_evidence.py --baseline /tmp/old-results --fixed /tmp/edge-fixed --experiment profile3=/tmp/edge-profile3 --experiment outer11=/tmp/edge-outer11 --experiment width11=/tmp/edge-width11 --controls /tmp/edge-controls --out edge-evidence
+          python3 kedavra/tools/detail/probe_profiles.py --exe kedavra/build/kfg_posttest --spv kedavra/build --variant detail3=/tmp/detail3-spv --variant old=/tmp/old-spv --variant fixed=kedavra/build --variant conservative=/tmp/edge-variants/conservative --variant balanced=/tmp/edge-variants/balanced --variant strong=/tmp/edge-variants/strong --out /tmp/edge-controls
+          python3 kedavra/tools/detail/edge_evidence.py --baseline /tmp/old-results --fixed /tmp/edge-fixed --experiment detail3=/tmp/edge-detail3 --experiment conservative=/tmp/edge-conservative --experiment balanced=/tmp/edge-balanced --experiment strong=/tmp/edge-strong --controls /tmp/edge-controls --out edge-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: edge-evidence

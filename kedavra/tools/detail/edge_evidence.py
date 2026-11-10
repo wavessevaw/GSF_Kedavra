@@ -21,7 +21,7 @@ a = p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
 variants = {'fixed': a.fixed, **{n:Path(d) for n,d in (s.split('=',1) for s in a.experiment)}}
 inputs = sorted(a.baseline.glob('*/input.png'))
 groups = {}; temporal = {}; provenance = {}; images = {}
-modes = ['off','cas','dls','old','fixed']
+modes = ['off','cas','dls','old'] + (['detail3'] if 'detail3' in variants else []) + ['fixed']
 def png(rgb):
     buffer = io.BytesIO(); Image.fromarray(rgb).save(buffer, format='PNG'); return buffer.getvalue()
 def luma(rgb): return np.dot(rgb.astype(float),[.2126,.7152,.0722])
@@ -46,7 +46,7 @@ with zipfile.ZipFile(a.out/'Edge-Evidence.zip','w',zipfile.ZIP_DEFLATED,compress
     for group,names in groups.items():
         if len(names)<10: continue
         names=sorted(names); temporal[group]={}
-        for mode in [*modes,*[v for v in variants if v!='fixed']]:
+        for mode in [*modes,*[v for v in variants if v not in modes]]:
             errors=[luma(images[n][mode])-luma(images[n]['reference']) for n in names]
             correction=[luma(images[n][mode])-luma(images[n]['input']) for n in names]
             temporal[group][mode]={
@@ -77,9 +77,9 @@ with zipfile.ZipFile(a.out/'Edge-Evidence.zip','w',zipfile.ZIP_DEFLATED,compress
     for name,path in variants.items(): z.write(path/'results.json',f'metrics/{name}.json')
     for path in a.controls.iterdir():
         if path.suffix in ['.json','.png']: z.write(path,'controls/'+path.name)
-    z.writestr('README.txt','Opt-in Detail bug-fix evidence. Edge experiments were rejected.\n'
-        'old = v1.5.1-detail.2; fixed = colour-channel correction.\n'
-        'profile3/outer11/width11 are REJECTED experiments and are not installed.\n'
+    z.writestr('README.txt','Opt-in bounded CAS-derived Edge candidate evidence.\n'
+        'old = v1.5.1-detail.2; detail3 = colour-fixed previous shader; fixed = selected balanced Edge.\n'
+        'conservative/strong are comparison configurations; balanced is installed.\n'
         'Per-frame PNGs are lossless; MP4 is a lossy review aid, not timing evidence.\n'
         'Ring control is procedural Pillow UnsharpMask, not OptiScaler.\n'
         'No Steam Deck GPU or game/upscaler compatibility validation.\n')

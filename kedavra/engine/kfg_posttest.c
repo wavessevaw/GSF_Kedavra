@@ -545,7 +545,8 @@ static void test_detail(post_env *e)
 	size_t m = (size_t)(e->h/2)*e->w + e->w/2;
 	CHECK(out[4*m]-out[4*(m-1)] > src[4*m]-src[4*(m-1)], "detail steepens soft edge interior");
 	for (size_t i=0; i<n; i++) {
-		CHECK(out[4*i] >= 65 && out[4*i] <= 190, "detail adds halo at %zu", i);
+		// Revised contract: bounded excursion (0.025 encoded units), not zero ringing.
+		CHECK(out[4*i] >= 58 && out[4*i] <= 197, "detail exceeds bounded excursion at %zu", i);
 		CHECK(out[4*i+3] == src[4*i+3], "detail changes alpha at %zu", i);
 	}
 	// Regression: a constant blue channel used to cancel sharpening in red/green.

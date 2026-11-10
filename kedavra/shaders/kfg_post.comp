@@ -400,11 +400,9 @@ vec3 dls(float sharpen, float denoise)
 	return clamp(x + (acc - lx), 0.0, 1.0);
 }
 
-// Spatial Detail Reconstruction, SDR only. Nine samples, no history, one dispatch.
-// A directional high-pass acts across coherent edges. Local channel bounds prevent
-// new extrema; one scale preserves the RGB correction direction instead of clipping
-// channels apart. This is not a guarantee of unchanged hue on every colour edge.
-// Low contrast and inconsistent gradients reduce gain conservatively (not a denoiser).
+// Bounded CAS-derived edge enhancement, SDR only. Nine samples, one dispatch.
+// CAS-derived per-channel correction with direction weighting, smooth protection
+// and a small bounded excursion. No history, external upscaler detection or extra pass.
 vec3 detail(float strength, vec3 e)
 {
 	vec3 a = px(ivec2(-1, -1)), b = px(ivec2(0, -1)), c = px(ivec2(1, -1));
@@ -423,18 +421,29 @@ vec3 detail(float strength, vec3 e)
 	float lo = min(le, min(min(lb, ld), min(lf, lh)));
 	float hi = max(le, max(max(lb, ld), max(lf, lh)));
 	float range = hi - lo;
-	float gain = strength * coherence * coherence * smoothstep(0.025, 0.10, range);
-	vec3 mn = min(e, min(min(b, d), min(f, h)));
-	vec3 mx = max(e, max(max(b, d), max(f, h)));
-	// A constant colour channel must not veto detail in the other two. Applying a
-	// shared additive luma delta made its zero-width bounds suppress ALL channels.
-	vec3 delta = gain * ((e - 0.5*(d+f))*direction.x + (e - 0.5*(b+h))*direction.y);
-	vec3 budget = min(0.25*(mx-mn), mix(e-mn, mx-e, greaterThan(delta, vec3(0))));
-	vec3 limit = mix(vec3(1), min(vec3(1), budget/max(abs(delta), vec3(1e-6))),
-		greaterThan(abs(delta), vec3(1e-6)));
-	// One scale preserves the direction of the RGB detail correction. Zero-change
-	// channels are excluded; all changing channels still respect their local bounds.
-	return e + delta * min(min(limit.r, limit.g), limit.b);
+	vec3 mn = min(e, min(min(b,d),min(f,h)));
+	vec3 mx = max(e, max(max(b,d),max(f,h)));
+	vec3 mn9 = min(mn,min(min(a,c),min(g,i)));
+	vec3 mx9 = max(mx,max(max(a,c),max(g,i)));
+	// CAS contrast response, guarded at black. No channel can veto another.
+	vec3 amp = sqrt(clamp(min(mn+mn9,2.0-mx-mx9)/max(mx+mx9,vec3(1e-5)),0.0,1.0));
+	vec3 w = -amp/(8.0-3.0*strength);
+	vec2 axisWeight = mix(vec2(0.5),direction,0.25);
+	vec3 residual = e - 0.5*((d+f)*axisWeight.x+(b+h)*axisWeight.y);
+	float jump = max(max(abs(le-lb),abs(le-lh)),max(abs(le-ld),abs(le-lf)));
+	float sharp = smoothstep(0.60,0.95,jump/max(range,1e-5))*smoothstep(0.08,0.30,range);
+	vec2 monotonic = vec2(abs(lf-ld)/max(abs(lf-le)+abs(le-ld),1e-5),
+	                     abs(lh-lb)/max(abs(lh-le)+abs(le-lb),1e-5));
+	float structure = mix(0.75,1.0,coherence);
+	float ringing = mix(0.75,1.0,dot(monotonic,axisWeight));
+	float gain = min(2.0*strength,1.0)*structure*ringing*(1.0-0.45*sharp)
+	           * smoothstep(0.01,0.06,range);
+	vec3 delta = residual*(-4.0*w)/(1.0+4.0*w)*gain;
+	vec3 budget = min(vec3(0.06),0.5*(mx-mn));
+	delta = clamp(delta,-budget,budget);
+	// Small bounded excursion, reduced at extrema/ringing, rather than zero-halo gating.
+	vec3 allowance = min(vec3(0.025),0.25*(mx-mn))*ringing*(1.0-0.8*sharp);
+	return clamp(e+delta,max(vec3(0),mn-allowance),min(vec3(1),mx+allowance));
 }
 
 #ifdef KFG_POST_RESEARCH
