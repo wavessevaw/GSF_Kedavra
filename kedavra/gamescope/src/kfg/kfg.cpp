@@ -1127,8 +1127,16 @@ namespace kfg
 				( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 			s.bPostPending = nTransfer >= 0 && kfg_post_active( &post );
 			if ( kfg_post_after_generation( &s.post ) )
-				s.pszFocusStatus = nTransfer < 0 ? "unsupported_source" :
-					nTransfer != KFG_TRANSFER_SDR ? "hdr_bypass" : "waiting";
+			{
+				// SourceTransfer also returns -1 for HDR when kfg_hdr is off.
+				// Identify the bypass reason from our own layer metadata, not a
+				// generic post-limited flag (which includes unsupported SDR formats).
+				const bool bHdrSource = pFrameInfo->layers.count() &&
+					( pFrameInfo->layers.get( 0 ).colorspace == GAMESCOPE_APP_TEXTURE_COLORSPACE_HDR10_PQ ||
+					  pFrameInfo->layers.get( 0 ).colorspace == GAMESCOPE_APP_TEXTURE_COLORSPACE_SCRGB );
+				s.pszFocusStatus = bHdrSource ? "hdr_bypass" :
+					nTransfer < 0 ? "unsupported_source" : "waiting";
+			}
 			if ( !s.bPostPending )
 				s.ulPostSkipped++;  // scRGB, kfg_hdr off or an unusual format: shown unfiltered
 		}

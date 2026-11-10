@@ -37,6 +37,9 @@ Focus status now comes from compositor recording, with a dedicated frame counter
 processing, waiting for game, Steam UI, unsupported source, HDR bypass or allocation
 failure. Accepted configuration alone is no longer described as proof of processing.
 A submitted-pass counter is not a GPU completion or image-quality measurement.
+HDR bypass is identified from Gamescope's own layer colour-space metadata, including
+when HDR generation is disabled. Unsupported SDR formats are reported separately;
+the legacy generic post-limited flag must not relabel them as HDR.
 
 ## Remaining research / acceptance gates
 
