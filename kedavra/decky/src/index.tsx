@@ -3,7 +3,7 @@ import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
 
-const VERSION = '1.5.1-detail.4';
+const VERSION = '1.6.0';
 
 type Summary = {pass?: boolean; p95_ms?: number; p99_ms?: number; missed_pct?: number; rows?: number; checks?: Record<string, boolean>};
 type Report = {trace: string; report: string; ok: boolean; log: string; summary?: Summary};
@@ -139,7 +139,6 @@ function ListButton({title, sub, onClick, warn}: {title: string; sub?: string; o
 }
 
 const fmt = (v: number | null | undefined, d = 0) => v === null || v === undefined ? '—' : v.toFixed(d);
-const boundedStrength = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 50;
 
 function Content() {
   const [status, setStatus] = useState<Status>();
@@ -147,8 +146,6 @@ function Content() {
   const [hud, setHud] = useState(true);
   const [x375, setX375] = useState(false);
   const [hdr, setHdr] = useState(true);
-  const [detailStrength, setDetailStrength] = useState(50);
-  const detailTimer = useRef<number | undefined>(undefined);
   const [base, setBase] = useState(30);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -161,8 +158,7 @@ function Content() {
   const lock = useRef(false);
   const baseTimer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setBase(r.base_fps); setX375(r.x375); setHdr(r.hdr); setDetailStrength(Math.round((r.detail_strength ?? 0.5) * 100));}).catch(() => {});}, []);
-  useEffect(() => () => window.clearTimeout(detailTimer.current), []);
+  useEffect(() => {rpc.settings().then(r => {setHud(r.hud); setBase(r.base_fps); setX375(r.x375); setHdr(r.hdr);}).catch(() => {});}, []);
   const refreshDiag = async () => {try {setDiag(await rpc.diagnose());} catch (e) {setMessage(String(e));}};
   useEffect(() => {void refreshDiag();}, []);
   useEffect(() => {
@@ -170,8 +166,6 @@ function Content() {
     const refresh = async () => {
       try {const s = await rpc.status(); if (!gone) {
         setStatus(s);
-        if (s.detail && s.detail_strength !== undefined && detailTimer.current === undefined && !lock.current)
-          setDetailStrength(Math.round(s.detail_strength * 100));
       }}
       catch (e) {if (!gone) setMessage(String(e));}
     };
@@ -260,28 +254,16 @@ function Content() {
     setStatus(s => s ? {...s, detail: r.detail, post: r.post} : s);
     return r.detail ? `Kedavra Focus: ${strength}%` : 'Kedavra Focus off';
   });
-  const onDetailStrength = (v: number) => {
-    v = boundedStrength(v);
-    setDetailStrength(v);
-    window.clearTimeout(detailTimer.current);
-    detailTimer.current = window.setTimeout(() => {detailTimer.current = undefined; applyDetail(!!status?.detail, v);}, 400);
-  };
-
   if (view === 'setup') return <PanelSection>
     <Back onClick={() => setView('main')} title="Setup"/>
     <PanelSectionRow><div style={caps}>IMAGE CLARITY</div></PanelSectionRow>
     <PanelSectionRow><div className="gsf-green gsf-focus-controls" style={{...card, width: '100%', maxWidth: '100%', minWidth: 0, padding: `2px ${INSET}px`}}>
-      <ToggleField label="Kedavra Focus" description="Sharper soft contours with controlled halos. Applies live, with or without frame generation."
+      <ToggleField label="Kedavra Focus" description="Adaptive edge enhancement at 100%. Applies live, with or without frame generation."
         checked={!!status?.detail} disabled={busy || !running} bottomSeparator="standard"
-        onChange={v => {window.clearTimeout(detailTimer.current); detailTimer.current = undefined; const strength = v && detailStrength === 0 ? 50 : detailStrength;
-          setDetailStrength(strength); applyDetail(v, strength);}}/>
-      <div style={{padding: '0 18px', width: '100%', minWidth: 0, boxSizing: 'border-box'}}>
-      <SliderField label="Processing strength" value={boundedStrength(detailStrength)} min={0} max={100} step={5} showValue valueSuffix="%" validValues="steps" editableValue={false}
-        disabled={busy || !running} bottomSeparator="none" onChange={onDetailStrength}/>
-      </div>
+        onChange={v => applyDetail(v, 100)}/>
     </div></PanelSectionRow>
     <PanelSectionRow><div style={{fontSize: 11, color: C.muted, lineHeight: 1.4}}>
-      {status?.post_error || (!status?.detail ? 'Focus off. Strength alone does not enable it.' :
+      {status?.post_error || (!status?.detail ? 'Focus off. Enable for fixed 100% processing.' :
         status?.focus_status === 'processing' ? `Processing SDR frames: ${status.focus_frames ?? 0}. Local edge clarity, not global contrast.` :
         status?.focus_status === 'steam_ui' ? `Steam UI is not filtered. Game passes recorded this session: ${status.focus_frames ?? 0}.` :
         status?.focus_status === 'hdr_bypass' || (!status?.focus_status && status?.post_hdr_limited) ? 'Bypassed: HDR source. No Focus processing.' :

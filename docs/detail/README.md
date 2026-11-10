@@ -1,99 +1,75 @@
-# Kedavra Detail Reconstruction — research candidate
+# GSF Kedavra 1.6.0
 
-**Version: 1.5.1-detail.4, based on the published GSF Kedavra 1.5.0.**
-This is an opt-in test candidate, not a Stable release. No Steam Deck LCD/OLED was
-available during development. Hardware GPU budget, frame pacing, latency and
-perceptual acceptance remain open. Do not infer FSR 4 reconstruction quality.
+Frame generation and adaptive edge enhancement inside Gamescope for Steam Deck LCD/OLED.
 
-## What changes
+[Download 1.6.0](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0) · [GFG Extreme 3.4.0](https://github.com/wavessevaw/GFG-Extreme/releases/tag/v3.4.0)
 
-`detail=S` adds spatial sharpening to the existing `STAGE_SHARPEN`. Strength is
-0–1; `detail=0` bypasses the effect with no dispatch and no pixel changes. The
-default remains off. CAS and DLS remain available with their existing behavior.
-Only the last sharpening token is selected, so Detail does not stack with CAS/DLS.
+## What is new
 
-Focus now uses a bounded CAS-derived edge response: directional weighting, smooth
-reduction on high-contrast sharp boundaries, local ringing attenuation and per-channel
-limits. The selected balanced configuration replaces the .3 Detail shader. It uses
-nine samples and one dispatch, with no new buffers. Controlled excursions of up to
-0.025 encoded SDR units (approximately 6 code values) are allowed; zero ringing is
-not promised. Noise can increase, although less than the existing CAS in the measured
-control. Use lower strength or disable Focus on noisy or already oversharpened inputs.
+**Kedavra Focus** is now a single on/off switch in Setup. Enabling it applies the
+accepted bounded CAS-derived edge enhancement at **100% strength**. There is no
+Focus strength slider. It improves soft contours and texture definition using
+local contrast and direction analysis, reduces gain on already sharp boundaries,
+and limits excessive excursions. All of these mechanisms run automatically.
 
-See [the balanced candidate report](BALANCED.md) for comparisons and trade-offs.
-Earlier EDGE-STATUS.md describes the historical .3 rejection, not this algorithm.
+Focus uses one existing sharpen pass and nine image samples. No additional
+full-resolution buffers, temporal history or CPU readbacks were added. It works
+with Frame Generation off, x2, x3 and Auto, on the final displayed real or generated
+SDR frame. Switching it off removes the Focus pass. Focus starts off after a
+Gamescope restart; the processing strength is fixed at 100% whenever enabled.
 
-Detail chains operate on each displayed real or generated frame, including both
-intermediate phases of ×3. They use the existing post images and dispatch path.
-There are no new motion fields, history buffers, runtime libraries or CPU readbacks.
-Legacy presets retain the 1.5.0 source-prefilter path. If other effects are combined
-with Detail, that entire existing chain runs after generation. This costs more
-often than legacy source-prefiltering when FG is enabled; the hardware cost must
-be measured at the display rate, not only the game's source rate.
+The frame-generation algorithms, Silk scheduler, pacing controls, HUD, diagnostics
+and rollback support are retained from the existing release lineage. This release
+continues the official 1.5.0 / Silk lineage; cancelled 1.4.1–1.4.4 work is not its base.
 
-**SDR only for the new effect.** HDR10/PQ bypasses Detail; explicitly selected
-legacy effects retain their existing HDR policy. scRGB retains full post bypass,
-including negative and above-one values. No new SDR clamp is applied to HDR.
+## Image compatibility
 
-## Install and use
+Focus processes the finished image without detecting or modifying FSR, XeSS, DLSS,
+TAA/TSR, OptiScaler, Gamescope scaling or game settings. It does not reconstruct
+missing ML detail. CAS and DLS remain available through the existing controls/API;
+Focus selects its own sharpening algorithm rather than stacking another CAS/DLS pass.
 
-1. Keep the official [1.5.0 ZIP](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.5.0)
-   available for rollback. Preserve your current settings.
-2. Download the candidate ZIP and its `.sha256` file from the linked CI run.
-   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.4.zip.sha256` in that directory.
-3. In Decky Loader developer settings, install the ZIP. It contains the **KEDAVRA**
-   plugin, complete bundled Gamescope runtime, shaders and standalone test tools.
-4. Open KEDAVRA, use its existing runtime install/update action, then reboot.
-   Check Diagnostics to confirm the installed runtime matches the bundled commit.
-5. Open **Setup → Kedavra Focus**. The switch and **Processing strength** slider
-   (0–100%, initially 50%) apply live without restarting the game. Strength is saved;
-   the switch reflects the running compositor and starts off after Gamescope restarts.
-   Focus works with frame generation off or on. HDR sources bypass the effect.
-   During this plugin session, disabling Focus restores the previous CAS/DLS selection
-   while preserving other effects. Changes made by another controller are not repeatedly
-   overridden. Failed or unconfirmed commands are reported instead of showing success.
-6. The existing command-line mechanism remains available, for example:
+**Focus is SDR-only.** HDR10 and scRGB retain the safe bypass; existing HDR frame
+generation and legacy filter policies remain. Setup reports processing and bypass
+status. Noise and existing FG artifacts can become more visible on difficult input;
+use the Focus switch to compare or disable it on already oversharpened/noisy images.
 
-   ```sh
-   /var/lib/kedavra/runtime/bin/gamescopectl kfg_post 'detail=0.5'
-   ```
+## Installation
 
-   Run from a terminal in that Gamescope session. If necessary, use the session's
-   `XDG_RUNTIME_DIR` and `GAMESCOPE_WAYLAND_DISPLAY`; do not target a different compositor.
-   A separate controller such as GFG may overwrite `kfg_post` when applying a preset.
+1. Download the full ZIP and SHA256 file from the release page. Keep the previous
+   official ZIP for rollback. Verify the checksum before installation.
+2. Install the ZIP using Decky Loader's developer installation option.
+3. Open Kedavra Setup, choose **Reinstall Gamescope KEDAVRA**, then reboot.
+   Updating the plugin alone does not replace the currently running compositor.
+4. Enable **Kedavra Focus** in Setup. It applies live at 100%; no game restart is
+   needed for subsequent on/off changes. Diagnostics identifies the installed runtime.
 
-Test with FG off, ×2 and ×3 using the existing FG controls. Start at 50%. For an already sharp external upscaler output,
-leave Detail off. No attempt is made to detect FSR or OptiScaler from pixels.
+Use one controlling plugin at a time. GFG Extreme 3.4.0 includes the same engine
+and exposes Focus in Graphics alongside its power/performance management features.
 
-Disable all post effects immediately with:
+## Rollback
 
-```sh
-/var/lib/kedavra/runtime/bin/gamescopectl kfg_post ''
-```
+Use the existing restore/remove action and reboot to restore system Gamescope.
+To return to Kedavra 1.5.0, install its official plugin ZIP, install that bundled
+runtime and reboot again. The automatic boot rollback mechanism remains present.
+Kedavra's runtime is installed separately and bind-mounted; SteamOS's system image
+is not replaced by the plugin package.
 
-`detail=0` disables only the selected sharpener; other named effects in the same
-string remain active. Switching between legacy and Detail placement invalidates
-old source history once, preventing mixing filtered and unfiltered ring frames.
+## Validation and scope
 
-## Roll back
+The preceding Focus candidate was tested and accepted by the user, who authorized
+this official release. Shader/Vulkan, engine/scheduler, plugin/backend and runtime
+build checks remain reproducible in CI. The full package contains the matching
+Gamescope runtime and standalone benchmark tools.
 
-Use the KEDAVRA panel's existing remove/restore action and reboot to restore the
-system Gamescope. Reinstall the official 1.5.0 plugin ZIP, install its runtime and
-reboot again. Verify the version in Diagnostics. The installer uses a boot service
-and bind mount; it does not replace the SteamOS system image. The existing automatic
-boot rollback remains present, but is not a substitute for keeping the stable ZIP.
+No new hardware GPU-budget certification is claimed. The recorded development
+measurements use software Vulkan; formal Steam Deck GPU time, compositor P95/P99
+and upscaler-specific capture matrices remain unverified by the development
+executor. User acceptance is not relabeled as those quantitative measurements.
 
-## Evidence and acceptance
+The algorithm and comparison history are in [the technical report](BALANCED.md).
+That report describes the research candidate and its former slider; 1.6.0 uses the
+same shader with a fixed 100% UI setting. Sources for this release are pinned by
+the **v1.6.0** tag; use that tag when rebuilding.
 
-See [architecture](ARCHITECTURE.md), [comparison and limitations](REPORT.md), and
-[Steam Deck verification](DECK-VALIDATION.md). The PR is a draft until hardware
-and visual acceptance are complete. CI builds a candidate artifact only; this
-branch has no Stable release publishing job.
-
-Implemented and software-checked: parsing, zero bypass, one sharpen pass, alpha
-preservation, local bounds, SDR output, compile/build tests and comparison tooling.
-Device checks still needed: OLED/LCD timing and P95/P99, HDR passthrough in the
-actual compositor, game capture temporal behavior, external upscalers, installation
-and rollback on SteamOS. An offline image metric is not a perceptual validation.
-
-See EDGE-STATUS.md for the contour audit, current fixes and unverified acceptance gates.
+GPL-3.0. See LICENSE.md and the shader third-party notices included in the package.

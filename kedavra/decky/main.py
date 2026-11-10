@@ -25,11 +25,11 @@ class Plugin:
         self.health = loop.create_task(self._health())
         self.hud_task = loop.create_task(self._hud())
 
-    DEFAULTS = {"hud": True, "base_fps": 30, "x375": False, "hdr": True, "detail_strength": 0.5}
+    DEFAULTS = {"hud": True, "base_fps": 30, "x375": False, "hdr": True, "detail_strength": 1.0}
 
     def _load_settings(self):
         try:
-            return {**self.DEFAULTS, **json.loads(self.settings_path.read_text())}
+            return {**self.DEFAULTS, **json.loads(self.settings_path.read_text()), "detail_strength": 1.0}
         except (OSError, ValueError):
             return dict(self.DEFAULTS)
 
@@ -89,11 +89,11 @@ class Plugin:
     async def get_settings(self):
         return {"hud": bool(self.settings.get("hud")), "base_fps": int(self.settings.get("base_fps") or 30),
                 "x375": bool(self.settings.get("x375")), "hdr": bool(self.settings.get("hdr")),
-                "detail_strength": float(self.settings.get("detail_strength", 0.5))}
+                "detail_strength": float(self.settings.get("detail_strength", 1.0))}
 
-    async def set_detail(self, enabled: bool, strength: float):
+    async def set_detail(self, enabled: bool, strength: float = 1.0):
         async with self.lock:
-            result = await asyncio.to_thread(self.ctl.set_detail, enabled, strength)
+            result = await asyncio.to_thread(self.ctl.set_detail, enabled, 1.0)
             self.settings["detail_strength"] = result["detail_strength"]
             await asyncio.to_thread(self._save_settings)
             return result
@@ -127,7 +127,7 @@ class Plugin:
         st["live"] = self.hud.live  # rates from the once-a-second HUD loop
         st["detail"] = self.ctl.detail_enabled(st.get("post", "")) and not st.get("post_error")
         st["detail_strength"] = (float(self.ctl.sharpen_tokens(st["post"])[-1][7:]) if st["detail"]
-                                 else float(self.settings.get("detail_strength", 0.5)))
+                                 else float(self.settings.get("detail_strength", 1.0)))
         return st
 
     async def set_multiplier(self, mult: int):
