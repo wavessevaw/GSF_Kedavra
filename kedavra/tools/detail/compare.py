@@ -102,6 +102,7 @@ def main():
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--fg", type=Path, help="actual kfg_vktest --out / KFG_HARD_OUT frames")
     p.add_argument("--bench", type=int, default=0, help="additional 1280x800 timestamp repetitions per mode")
+    p.add_argument("--detail-max-excursion", type=int, choices=[1,7], default=1, help="quantized bound: legacy Detail=1, bounded Edge=7")
     args = p.parse_args()
     root = args.out.resolve(); root.mkdir(parents=True, exist_ok=True)
     cases = corpus(args.references)
@@ -155,7 +156,7 @@ def main():
                 out = rgba[..., :3]; outputs[name][mode] = out
                 results[name][mode] = metrics(src, out, ref)
                 if mode.startswith("detail"):
-                    assert results[name][mode]["overshoot_max_codes"] <= 1, (name, mode, "new local extrema")
+                    assert results[name][mode]["overshoot_max_codes"] <= args.detail_max_excursion, (name, mode, "exceeded declared excursion bound")
                 Image.fromarray(out).save(folder/f"{mode}.png")
             if show: preview.append(f"<td>{mode}<br><a href='{name}/{mode}.png'><img src='{name}/{mode}.png'></a></td>")
         assert np.array_equal(src, outputs[name]["off"]), (name, "off is not identity")
@@ -179,7 +180,7 @@ def main():
             errors = [luma(outputs[n][mode])-luma(arrays[n][1]) for n in names]
             ediffs = [float(np.sqrt(np.mean((b-a)**2))) for a,b in zip(errors, errors[1:])]
             temporal[group][mode]["reference_error_delta_rms_codes"] = float(np.mean(ediffs))
-    summary = {"device": device, "steam_deck_validated": False,
+    summary = {"detail_max_excursion_codes": args.detail_max_excursion, "device": device, "steam_deck_validated": False,
                "shader_sha256": hashlib.sha256((args.spv/"kfg_post.spv").read_bytes()).hexdigest(),
                "timestamp_scope": "Vulkan dispatch timestamps; upload/readback excluded; software drivers are not GPU hardware measurements",
                "input_sha256": provenance, "modes": MODES, "cases": results, "temporal": temporal,

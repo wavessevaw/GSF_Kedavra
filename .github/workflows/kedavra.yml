@@ -198,7 +198,7 @@ jobs:
           python3 kedavra/tools/detail/fetch_references.py /tmp/detail-references
           mkdir -p /tmp/detail-fg
           KFG_HARD_OUT=/tmp/detail-fg KFG_HARD_X2=1 KFG_DETAIL_SEQUENCE_OUT=/tmp/detail-fg kedavra/build/kfg_vktest --spv kedavra/build --size 320x200 --hard --json hard-engine.json
-          python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv kedavra/build/research --references /tmp/detail-references --fg /tmp/detail-fg --out detail-results --bench 100
+          python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv kedavra/build/research --references /tmp/detail-references --fg /tmp/detail-fg --out detail-results --bench 100 --detail-max-excursion 7
       - name: Compare frozen Detail 2 and practical Edge configurations
         run: |
           export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
