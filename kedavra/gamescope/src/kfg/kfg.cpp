@@ -188,6 +188,8 @@ namespace kfg
 		int nPostTransfer = KFG_TRANSFER_SDR;  // of the post images
 		bool bPostLimited = false;  // HDR frame: colour looks left out (last filtered frame)
 		uint64_t ulPostFrames = 0, ulPostSkipped = 0;
+		uint64_t ulFocusFrames = 0;
+		const char *pszFocusStatus = "off";
 		double flPostUsLast = 0, flPostUsSum = 0;
 		uint64_t ulPostSamples = 0;
 	};
@@ -732,6 +734,7 @@ namespace kfg
 		}
 		if ( bWasAfter != bool( kfg_post_after_generation( &s.post ) ) )
 			ResetHistory( s, "post placement change" ); // Never mix prefiltered and raw ring frames.
+		s.pszFocusStatus = kfg_post_after_generation( &s.post ) ? "waiting" : "off";
 		if ( !kfg_post_active( &s.post ) )
 		{
 			// Off: free the images (the SMAA tables are small and stay).
@@ -830,6 +833,7 @@ namespace kfg
 		{
 			s.ulPostSkipped++;
 			s.pszLastProblem = "post_allocation_failed";
+			if ( kfg_post_after_generation( &post ) ) s.pszFocusStatus = "allocation_failed";
 			return false;
 		}
 		if ( post.aa == KFG_AA_SMAA )
@@ -849,6 +853,10 @@ namespace kfg
 		else
 			layer0.tex = s.pPost[ nRing ].get();
 		s.ulPostFrames++;
+		if ( kfg_post_after_generation( &post ) ) {
+			s.ulFocusFrames++;
+			s.pszFocusStatus = "processing";
+		}
 		return true;
 	}
 
@@ -982,7 +990,7 @@ namespace kfg
 			"\"post\":\"%s\",\"post_active\":%s,\"post_error\":\"%s\",\"post_frames\":%" PRIu64 ",\"post_skipped\":%" PRIu64 ","
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
-			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u}\n",
+			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1000,7 +1008,7 @@ namespace kfg
 			s.flPostUsLast, s.ulPostSamples ? s.flPostUsSum / double( s.ulPostSamples ) : 0.0,
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs,
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
-			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight );
+			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight, s.pszFocusStatus, s.ulFocusFrames );
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1106,8 +1114,10 @@ namespace kfg
 			if ( bSteamUI )
 				ResetHistory( s, "steam ui" );
 		}
-		if ( bSteamUI )
+		if ( bSteamUI ) {
+			if ( kfg_post_after_generation( &s.post ) ) s.pszFocusStatus = "steam_ui";
 			return;
+		}
 		// Filters apply to the game's frames whether generation is on or not.
 		if ( kfg_post_active( &s.post ) )
 		{
@@ -1116,6 +1126,9 @@ namespace kfg
 			s.bPostLimited = nTransfer != KFG_TRANSFER_SDR &&
 				( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 			s.bPostPending = nTransfer >= 0 && kfg_post_active( &post );
+			if ( kfg_post_after_generation( &s.post ) )
+				s.pszFocusStatus = nTransfer < 0 ? "unsupported_source" :
+					nTransfer != KFG_TRANSFER_SDR ? "hdr_bypass" : "waiting";
 			if ( !s.bPostPending )
 				s.ulPostSkipped++;  // scRGB, kfg_hdr off or an unusual format: shown unfiltered
 		}

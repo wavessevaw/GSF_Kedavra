@@ -548,6 +548,12 @@ static void test_detail(post_env *e)
 		CHECK(out[4*i] >= 65 && out[4*i] <= 190, "detail adds halo at %zu", i);
 		CHECK(out[4*i+3] == src[4*i+3], "detail changes alpha at %zu", i);
 	}
+	// Regression: a constant blue channel used to cancel sharpening in red/green.
+	for (size_t i=0; i<n; i++) src[4*i+2] = 0;
+	memcpy(out, src, n*4);
+	CHECK(!run_post(e, "detail=1", 0, out, NULL), "constant-channel detail dispatch");
+	CHECK(out[4*m]-out[4*(m-1)] > src[4*m]-src[4*(m-1)], "constant blue must not suppress red contour");
+	for (size_t i=0; i<n; i++) CHECK(out[4*i+2] == 0, "constant channel changed");
 	// Already hard boundaries must not acquire ringing. Flat black/white must stay finite.
 	for (size_t i=0; i<n; i++)
 		src[4*i] = src[4*i+1] = src[4*i+2] = i % e->w < e->w/2 ? 0 : 255;

@@ -419,17 +419,21 @@ vec3 detail(float strength, vec3 e)
 	float coherence = (abs(gradient.x) + abs(gradient.y)) / max(activity, 1e-5);
 	vec2 direction = gradient * gradient;
 	direction /= max(direction.x + direction.y, 1e-5);
-	float residual = dot(vec2(le - 0.5*(ld+lf), le - 0.5*(lb+lh)), direction);
 	float lo = min(le, min(min(lb, ld), min(lf, lh)));
 	float hi = max(le, max(max(lb, ld), max(lf, lh)));
 	float range = hi - lo;
 	float gain = strength * coherence * coherence * smoothstep(0.025, 0.10, range);
-	float delta = clamp(gain * residual, -0.25 * range, 0.25 * range);
 	vec3 mn = min(e, min(min(b, d), min(f, h)));
 	vec3 mx = max(e, max(max(b, d), max(f, h)));
-	vec3 lower = mn - e, upper = mx - e;
-	delta = clamp(delta, max(max(lower.r, lower.g), lower.b), min(min(upper.r, upper.g), upper.b));
-	return e + delta;
+	// A constant colour channel must not veto detail in the other two. Applying a
+	// shared additive luma delta made its zero-width bounds suppress ALL channels.
+	vec3 delta = gain * ((e - 0.5*(d+f))*direction.x + (e - 0.5*(b+h))*direction.y);
+	vec3 budget = min(0.25*(mx-mn), mix(e-mn, mx-e, greaterThan(delta, vec3(0))));
+	vec3 limit = mix(vec3(1), min(vec3(1), budget/max(abs(delta), vec3(1e-6))),
+		greaterThan(abs(delta), vec3(1e-6)));
+	// One scale preserves the direction of the RGB detail correction. Zero-change
+	// channels are excluded; all changing channels still respect their local bounds.
+	return e + delta * min(min(limit.r, limit.g), limit.b);
 }
 
 #ifdef KFG_POST_RESEARCH

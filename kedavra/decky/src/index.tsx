@@ -3,13 +3,14 @@ import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
 
-const VERSION = '1.5.1-detail.2';
+const VERSION = '1.5.1-detail.3';
 
 type Summary = {pass?: boolean; p95_ms?: number; p99_ms?: number; missed_pct?: number; rows?: number; checks?: Record<string, boolean>};
 type Report = {trace: string; report: string; ok: boolean; log: string; summary?: Summary};
 type Capture = {path: string; started: number; label: string; elapsed_s: number} | null;
 type Live = {fps: number | null; real: number | null; pace: number | null; gen_share: number | null; unsupported?: number};
 type Status = {
+  focus_status?: string; focus_frames?: number;
   detail?: boolean; detail_strength?: number; post?: string; post_error?: string; post_hdr_limited?: boolean;
   engine: 'running' | 'stale' | 'absent'; fresh: boolean; message?: string; capture: Capture; live?: Live;
   multiplier?: number; state?: string; refresh_ns?: number; width?: number; height?: number;
@@ -138,6 +139,7 @@ function ListButton({title, sub, onClick, warn}: {title: string; sub?: string; o
 }
 
 const fmt = (v: number | null | undefined, d = 0) => v === null || v === undefined ? '—' : v.toFixed(d);
+const boundedStrength = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 50;
 
 function Content() {
   const [status, setStatus] = useState<Status>();
@@ -259,6 +261,7 @@ function Content() {
     return r.detail ? `Kedavra Focus: ${strength}%` : 'Kedavra Focus off';
   });
   const onDetailStrength = (v: number) => {
+    v = boundedStrength(v);
     setDetailStrength(v);
     window.clearTimeout(detailTimer.current);
     detailTimer.current = window.setTimeout(() => {detailTimer.current = undefined; applyDetail(!!status?.detail, v);}, 400);
@@ -267,17 +270,25 @@ function Content() {
   if (view === 'setup') return <PanelSection>
     <Back onClick={() => setView('main')} title="Setup"/>
     <PanelSectionRow><div style={caps}>IMAGE CLARITY</div></PanelSectionRow>
-    <PanelSectionRow><div className="gsf-green" style={{...card, padding: `2px ${INSET}px`}}>
+    <PanelSectionRow><div className="gsf-green gsf-focus-controls" style={{...card, width: '100%', maxWidth: '100%', minWidth: 0, padding: `2px ${INSET}px`}}>
       <ToggleField label="Kedavra Focus" description="Sharper soft contours with controlled halos. Applies live, with or without frame generation."
         checked={!!status?.detail} disabled={busy || !running} bottomSeparator="standard"
         onChange={v => {window.clearTimeout(detailTimer.current); detailTimer.current = undefined; const strength = v && detailStrength === 0 ? 50 : detailStrength;
           setDetailStrength(strength); applyDetail(v, strength);}}/>
-      <SliderField label="Processing strength" value={detailStrength} min={0} max={100} step={5} showValue
+      <div style={{padding: '0 18px', width: '100%', minWidth: 0, boxSizing: 'border-box'}}>
+      <SliderField label="Processing strength" value={boundedStrength(detailStrength)} min={0} max={100} step={5} showValue valueSuffix="%" validValues="steps" editableValue={false}
         disabled={busy || !running} bottomSeparator="none" onChange={onDetailStrength}/>
+      </div>
     </div></PanelSectionRow>
     <PanelSectionRow><div style={{fontSize: 11, color: C.muted, lineHeight: 1.4}}>
-      {status?.post_error ? status.post_error : status?.detail && status?.post_hdr_limited
-        ? 'Enabled, but bypassed for this HDR source.' : 'SDR only. 50% recommended; 0% disables Focus. Strength is saved; Focus starts off after Gamescope restarts.'}
+      {status?.post_error || (!status?.detail ? 'Focus off. Strength alone does not enable it.' :
+        status?.focus_status === 'processing' ? `Processing SDR frames: ${status.focus_frames ?? 0}. Local edge clarity, not global contrast.` :
+        status?.focus_status === 'steam_ui' ? 'Waiting for the game image; Steam UI is not filtered.' :
+        status?.focus_status === 'hdr_bypass' || status?.post_hdr_limited ? 'Bypassed: HDR source. No Focus processing.' :
+        status?.focus_status === 'unsupported_source' ? 'Bypassed: unsupported game image format.' :
+        status?.focus_status === 'allocation_failed' ? 'Focus could not allocate its post-processing target.' :
+        status?.focus_status ? 'Selected; waiting for a game frame to process.' :
+        'Runtime cannot confirm Focus processing. Install this candidate runtime and reboot.')}
     </div></PanelSectionRow>
     <div style={gap}/>
     <PanelSectionRow><DialogButton onClick={() => setShowChecks(!showChecks)} className="gsf-row" style={{...card, ...flat, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left'}}>
@@ -436,7 +447,10 @@ function Content() {
 // white). A filter on Steam's own classes, so it does not depend on how Steam draws the fill.
 const GREEN_CONTROLS = `.gsf-green .${gamepadSliderClasses.SliderTrack}, .gsf-green .${gamepadDialogClasses.ToggleRail} {
   filter: hue-rotate(-91deg) saturate(0.6) brightness(1.25);
-}`;
+}
+.gsf-focus-controls, .gsf-focus-controls > div { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.gsf-focus-controls .${gamepadSliderClasses.SliderControlPanelGroup} { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; }
+`;
 
 // Steam marks the element under the stick / D-pad cursor with .gpfocus, but our inline
 // backgrounds hid its highlight. The focused tile turns light, as in GFG Extreme.

@@ -1,6 +1,6 @@
 # Kedavra Detail Reconstruction — research candidate
 
-**Version: 1.5.1-detail.2, based on the published GSF Kedavra 1.5.0.**
+**Version: 1.5.1-detail.3, based on the published GSF Kedavra 1.5.0.**
 This is an opt-in test candidate, not a Stable release. No Steam Deck LCD/OLED was
 available during development. Hardware GPU budget, frame pacing, latency and
 perceptual acceptance remain open. Do not infer FSR 4 reconstruction quality.
@@ -35,7 +35,7 @@ including negative and above-one values. No new SDR clamp is applied to HDR.
 1. Keep the official [1.5.0 ZIP](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.5.0)
    available for rollback. Preserve your current settings.
 2. Download the candidate ZIP and its `.sha256` file from the linked CI run.
-   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.2.zip.sha256` in that directory.
+   Run `sha256sum -c GSF-Kedavra-1.5.1-detail.3.zip.sha256` in that directory.
 3. In Decky Loader developer settings, install the ZIP. It contains the **KEDAVRA**
    plugin, complete bundled Gamescope runtime, shaders and standalone test tools.
 4. Open KEDAVRA, use its existing runtime install/update action, then reboot.
@@ -90,3 +90,5 @@ preservation, local bounds, SDR output, compile/build tests and comparison tooli
 Device checks still needed: OLED/LCD timing and P95/P99, HDR passthrough in the
 actual compositor, game capture temporal behavior, external upscalers, installation
 and rollback on SteamOS. An offline image metric is not a perceptual validation.
+
+See EDGE-STATUS.md for the contour audit, current fixes and unverified acceptance gates.
