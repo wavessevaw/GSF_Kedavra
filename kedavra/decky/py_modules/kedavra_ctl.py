@@ -47,6 +47,13 @@ class Control:
         return env
 
     def _ctl(self, *args):
+        lease = getattr(self, "controller_lease", None)
+        if lease is not None:
+            with lease.command():
+                return self._ctl_owned(*args)
+        return self._ctl_owned(*args)
+
+    def _ctl_owned(self, *args):
         exe = next((str(p) for p in self.ctl_candidates if p.exists()), None) or shutil.which("gamescopectl") or "gamescopectl"
         r = self.run([exe, *map(str, args)], env=self._env(), capture_output=True, text=True, timeout=5)
         if r.returncode != 0:

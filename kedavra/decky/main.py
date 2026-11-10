@@ -6,6 +6,7 @@ from pathlib import Path
 
 import decky
 from kedavra_ctl import Control
+from kedavra_controller import ControllerLease
 from kedavra_hud import Hud
 from kedavra_install import Installer, bench
 
@@ -14,12 +15,16 @@ class Plugin:
     async def _main(self):
         here = Path(__file__).resolve().parent
         self.ctl = Control(decky.DECKY_USER_HOME, here)
+        self.controller_lease = ControllerLease("gsf")
+        self.ctl.controller_lease = self.controller_lease
         self.inst = Installer(here, decky.DECKY_USER_HOME)
         self.out = Path(decky.DECKY_USER_HOME) / ".local/share/kedavra"
         self.lock = asyncio.Lock()
         self.settings_path = self.out / "settings.json"
         self.settings = self._load_settings()
         self.options_at = 0.0
+        self._was_controller = False
+        self._owned_policy = None
         self.hud = Hud()
         loop = asyncio.get_event_loop()
         self.health = loop.create_task(self._health())
@@ -44,7 +49,21 @@ class Plugin:
         # The on-screen HUD: rendered here once a second, drawn by the KEDAVRA Gamescope.
         while True:
             try:
+                active = await asyncio.to_thread(self.controller_lease.active)
+                if not active:
+                    self._was_controller = False
+                    await asyncio.to_thread(self.hud.tick, False, None)
+                    await asyncio.sleep(1)
+                    continue
+                if not self._was_controller:
+                    await asyncio.to_thread(self.ctl._ctl, "kfg_hud", "/dev/shm/kedavra-hud.raw")
+                    if self._owned_policy:
+                        for name, value in self._owned_policy.items():
+                            await asyncio.to_thread(self.ctl._ctl, name, value)
+                    self._was_controller = True
                 st = await asyncio.to_thread(self.ctl.status)
+                if st.get("fresh"):
+                    self._owned_policy = {"kfg_multiplier": st.get("req_multiplier",0), "kfg_base_fps": st.get("req_base_fps",0), "kfg_post":st.get("post","")}
                 await asyncio.to_thread(self.hud.tick, bool(self.settings.get("hud")), st)
                 # A restarted Gamescope comes back with its defaults: restore the engine options.
                 # (The status file is rewritten once a second, so wait a few before checking again.)
@@ -69,14 +88,18 @@ class Plugin:
     async def _unload(self):
         self.health.cancel()
         self.hud_task.cancel()
+        await asyncio.gather(self.health, self.hud_task, return_exceptions=True)
         await asyncio.to_thread(self.hud.tick, False, None)
+        await asyncio.to_thread(self.controller_lease.release)
 
     async def _uninstall(self):
+        if not await asyncio.to_thread(self.controller_lease.active):
+            return  # GFG owns the shared runtime; removing this panel must not remove it.
         try:
             await asyncio.to_thread(self.ctl.set_multiplier, 0)
         except Exception:
             pass
-        await asyncio.to_thread(self.inst.uninstall)
+        await asyncio.to_thread(self._runtime_action, self.inst.uninstall)
 
     async def get_hud(self):
         return {"hud": bool(self.settings.get("hud"))}
@@ -154,13 +177,17 @@ class Plugin:
     async def save_report(self):
         return await asyncio.to_thread(self.inst.report, self.out)
 
+    def _runtime_action(self, action):
+        with self.controller_lease.command():
+            return action()
+
     async def install(self):
         async with self.lock:
-            return await asyncio.to_thread(self.inst.install)
+            return await asyncio.to_thread(self._runtime_action, self.inst.install)
 
     async def uninstall(self):
         async with self.lock:
-            return await asyncio.to_thread(self.inst.uninstall)
+            return await asyncio.to_thread(self._runtime_action, self.inst.uninstall)
 
     async def reboot(self):
         return await asyncio.to_thread(self.inst.reboot)

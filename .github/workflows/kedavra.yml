@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -21,6 +21,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
+      - name: HUD input unit test
+        run: g++ -std=c++17 -pthread -Ikedavra/gamescope/src/kfg kedavra/tools/test_hud_input.cpp -o /tmp/hud-input-test && /tmp/hud-input-test
       - name: Build
         run: make -C kedavra all detail-lab
       - name: Scheduler unit tests and model stress matrix
@@ -165,15 +167,15 @@ jobs:
           path: deck-bench
       - name: Full install candidate with runtime, research bench and rollback instructions
         run: |
-          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.6.0.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
-          sha256sum GSF-Kedavra-1.6.0.zip > GSF-Kedavra-1.6.0.zip.sha256
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.6.1.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.6.1.zip > GSF-Kedavra-1.6.1.zip.sha256
           cp docs/detail/README.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
           name: GSF-Kedavra-Detail-Candidate
           path: |
-            GSF-Kedavra-1.6.0.zip
-            GSF-Kedavra-1.6.0.zip.sha256
+            GSF-Kedavra-1.6.1.zip
+            GSF-Kedavra-1.6.1.zip.sha256
             README-Detail-Candidate.md
 
   detail-lab:

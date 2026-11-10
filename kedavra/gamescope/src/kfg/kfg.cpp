@@ -1,3 +1,4 @@
+#include "kfg_hud_input.hpp"
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // KEDAVRA frame generation inside Gamescope. See kfg.hpp for the data flow.
@@ -151,6 +152,8 @@ namespace kfg
 		// Counters (status file).
 		uint64_t ulPaints = 0, ulApplied = 0, ulBypass = 0, ulRingMiss = 0, ulUnsupported = 0;
 		uint64_t ulOverBudget = 0, ulSources = 0, ulLastSourceNs = 0;
+        std::vector<double> nativeFrameMs;
+        uint32_t nativeApp = 0;
 		bool bSteamUI = false;  // the Steam client is the base plane (its menus, not the game)
 		bool bVRRHeld = false;  // adaptive sync was asked for and is held off for generation
 		uint32_t uAnalysisPixels = 0;  // kfg_analysis_pixels the images were made for
@@ -227,7 +230,7 @@ namespace kfg
 	{
 		gamescope::OwningRc<CVulkanTexture> pTex;
 		std::vector<uint8_t> pixels;
-		uint32_t uWidth = 0, uHeight = 0, uCorner = 0, uMargin = 12;
+		uint32_t uWidth = 0, uHeight = 0, uCorner = 0, uMargin = 12, uInputMode = 0;
 		uint32_t uOutputHeight = 0;  // of the last composite (a TV can be 2160 with a 1080p game)
 		uint64_t ulLastPollNs = 0;
 		int64_t nMtimeNs = -1;
@@ -304,6 +307,7 @@ namespace kfg
 			h.uHeight = hdr[ 3 ];
 		}
 		h.pixels = std::move( px );
+		h.uInputMode = hdr[7] <= 3 ? hdr[7] : 0;
 		h.uCorner = hdr[ 4 ] & 3u;
 		h.uMargin = std::min( hdr[ 5 ], 200u );
 		h.bUpload = true;
@@ -320,10 +324,12 @@ namespace kfg
 		const float flOutW = base.tex ? float( base.tex->width() ) / base.scale.x : 1280.0f;
 		const float flOutH = base.tex ? float( base.tex->height() ) / base.scale.y : 800.0f;
 		h.uOutputHeight = uint32_t( std::lround( flOutH ) );  // the HUD's size follows the screen
-		if ( !h.bVisible || !h.pTex || pFrameInfo->layers.count() >= k_nMaxLayers )
-			return;
+		if ( !h.bVisible || !h.pTex || pFrameInfo->layers.count() >= k_nMaxLayers ) {
+			hud_input::geometry(0,0,0,0,0); return;
+		}
 		const float flX = ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
 		const float flY = ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
+		hud_input::geometry(flX, flY, h.uWidth, h.uHeight, g_State.bSteamUI || !g_State.uPaintAppID ? 0 : h.uInputMode);
 
 		FrameInfo_t::Layer_t *layer = pFrameInfo->layers.push();
 		if ( !layer )
@@ -1009,6 +1015,16 @@ namespace kfg
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs,
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
 			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight, s.pszFocusStatus, s.ulFocusFrames );
+        // Extend the JSON object just written, replacing its final closing brace.
+        fseek(f, -2, SEEK_CUR);
+        uint64_t inputSeq; uint32_t inputAction;
+        hud_input::event(inputSeq, inputAction);
+        fprintf(f, ",\"hud_input_version\":1,\"hud_event_seq\":%" PRIu64 ",\"hud_event\":%u}\n", inputSeq, inputAction);
+        fseek(f, -2, SEEK_CUR);
+        fprintf(f, ",\"native_frame_ms\":[");
+        for (size_t i=0; i<s.nativeFrameMs.size(); ++i) fprintf(f, "%s%.4f", i?",":"", s.nativeFrameMs[i]);
+        fprintf(f, "]}\n");
+        s.nativeFrameMs.clear();
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1145,6 +1161,10 @@ namespace kfg
 		{
 			s.ulLastCommitID = ulBaseCommitID;
 			s.ulSources++;
+            if (s.nativeApp == uAppID && s.ulLastSourceNs && ulNow > s.ulLastSourceNs && s.nativeFrameMs.size() < 512)
+                s.nativeFrameMs.push_back(double(ulNow-s.ulLastSourceNs)/1e6);
+            else if (s.nativeApp != uAppID) s.nativeFrameMs.clear();
+            s.nativeApp = uAppID;
 			s.ulLastSourceNs = ulNow;
 		}
 
