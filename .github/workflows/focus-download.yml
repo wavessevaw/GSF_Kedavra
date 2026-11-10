@@ -1,0 +1,59 @@
+name: Distribute Focus test candidate
+on:
+  push:
+    branches: [distribution/focus-detail3]
+    paths: [.github/workflows/focus-download.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish-candidate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify successful source build and download its complete artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: wavessevaw/GSF_Kedavra
+        run: |
+          gh run watch 42757821039 --exit-status --interval 30
+          test "$(gh api repos/$GH_REPO/actions/runs/42757821039 --jq .conclusion)" = success
+          test "$(gh api repos/$GH_REPO/actions/runs/42757821039 --jq .head_sha)" = 32579d817affb9ebb8085eebe32371c55e915c28
+          gh run download 42757821039 --name GSF-Kedavra-Detail-Candidate --dir out
+          gh run download 42757821039 --name edge-evidence --dir evidence
+          (cd evidence && sha256sum -c Edge-Evidence.zip.sha256 && unzip -t Edge-Evidence.zip | tail -1)
+          cd out
+          sha256sum -c GSF-Kedavra-1.5.1-detail.3.zip.sha256
+          unzip -t GSF-Kedavra-1.5.1-detail.3.zip | tail -1
+          python3 - <<'PY'
+          import json, zipfile
+          with zipfile.ZipFile("GSF-Kedavra-1.5.1-detail.3.zip") as z:
+              assert json.loads(z.read("KEDAVRA/package.json"))["version"] == "1.5.1-detail.3"
+              assert "32579d8" in z.read("KEDAVRA/runtime/VERSION").decode()
+              ui = z.read("KEDAVRA/dist/index.js").decode()
+              assert "Kedavra Focus" in ui and "Processing strength" in ui
+              assert "Game passes recorded this session" in ui
+              assert "KEDAVRA/bench/kfg_posttest" in z.namelist()
+              assert "KEDAVRA/runtime/bin/gamescope" in z.namelist()
+              report = z.read("KEDAVRA/docs/detail/EDGE-STATUS.md").decode()
+              assert "reject all three new Edge variants" in report
+          with zipfile.ZipFile("../evidence/Edge-Evidence.zip") as z:
+              profiles = json.loads(z.read("controls/profiles.json"))["cases"]
+              assert profiles["ringing_proxy"]["fixed_0.5"]["halo_area_code_pixels"] == 150
+              assert profiles["ringing_proxy"]["width11_0.5"]["halo_area_code_pixels"] == 134
+              assert len({n.split("/")[1] for n in z.namelist() if n.startswith("frames/")}) >= 170
+          PY
+      - name: Publish as prerelease only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: wavessevaw/GSF_Kedavra
+        run: |
+          TAG=v1.5.1-detail.3
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite its assets."
+            exit 1
+          fi
+          gh release create "$TAG" out/GSF-Kedavra-1.5.1-detail.3.zip out/GSF-Kedavra-1.5.1-detail.3.zip.sha256 out/README-Detail-Candidate.md evidence/Edge-Evidence.zip evidence/Edge-Evidence.zip.sha256 \
+            --target 32579d817affb9ebb8085eebe32371c55e915c28 \
+            --title "Kedavra Focus — 1.5.1-detail.3 Test Candidate" \
+            --notes-file docs/detail/DOWNLOAD.md --prerelease --latest=false
