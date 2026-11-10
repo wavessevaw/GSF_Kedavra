@@ -402,7 +402,8 @@ vec3 dls(float sharpen, float denoise)
 
 // Spatial Detail Reconstruction, SDR only. Nine samples, no history, one dispatch.
 // A directional high-pass acts across coherent edges. Local channel bounds prevent
-// new extrema; a shared RGB delta preserves chroma instead of clipping channels apart.
+// new extrema; one scale preserves the RGB correction direction instead of clipping
+// channels apart. This is not a guarantee of unchanged hue on every colour edge.
 // Low contrast and inconsistent gradients reduce gain conservatively (not a denoiser).
 vec3 detail(float strength, vec3 e)
 {

@@ -1,0 +1,191 @@
+{
+  "scope": "analytical controls; not game/upscaler captures",
+  "cases": {
+    "soft": {
+      "input": {
+        "width20_80_px": 3.4285714285714306,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "cas": {
+        "width20_80_px": 3.214285714285708,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "dls": {
+        "width20_80_px": 3.0714285714285694,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "old_0.5": {
+        "width20_80_px": 3.153846153846146,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "old_1": {
+        "width20_80_px": 2.9183333333333366,
+        "position50_px": 127.48214285714286,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "fixed_0.5": {
+        "width20_80_px": 3.153846153846146,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "fixed_1": {
+        "width20_80_px": 2.9183333333333366,
+        "position50_px": 127.48214285714286,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "profile3_0.5": {
+        "width20_80_px": 3.153846153846146,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "profile3_1": {
+        "width20_80_px": 3.0,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "outer11_0.5": {
+        "width20_80_px": 3.153846153846146,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "outer11_1": {
+        "width20_80_px": 2.9183333333333366,
+        "position50_px": 127.48214285714286,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "width11_0.5": {
+        "width20_80_px": 3.307692307692321,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      },
+      "width11_1": {
+        "width20_80_px": 3.307692307692321,
+        "position50_px": 127.5,
+        "overshoot_codes": 0.0,
+        "undershoot_codes": 0.0,
+        "halo_area_code_pixels": 0.0
+      }
+    },
+    "ringing_proxy": {
+      "input": {
+        "width20_80_px": 1.6499999999999915,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 134.0
+      },
+      "cas": {
+        "width20_80_px": 1.5717526942711117,
+        "position50_px": 127.5,
+        "overshoot_codes": 22.0,
+        "undershoot_codes": 25.0,
+        "halo_area_code_pixels": 150.0
+      },
+      "dls": {
+        "width20_80_px": 1.5415282392026626,
+        "position50_px": 127.49038461538461,
+        "overshoot_codes": 23.0,
+        "undershoot_codes": 25.0,
+        "halo_area_code_pixels": 152.0
+      },
+      "old_0.5": {
+        "width20_80_px": 1.5,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 150.0
+      },
+      "old_1": {
+        "width20_80_px": 1.378989361702125,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 159.0
+      },
+      "fixed_0.5": {
+        "width20_80_px": 1.5,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 150.0
+      },
+      "fixed_1": {
+        "width20_80_px": 1.378989361702125,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 159.0
+      },
+      "profile3_0.5": {
+        "width20_80_px": 1.5238095238095184,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 140.0
+      },
+      "profile3_1": {
+        "width20_80_px": 1.4090909090909207,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 148.0
+      },
+      "outer11_0.5": {
+        "width20_80_px": 1.5,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 146.0
+      },
+      "outer11_1": {
+        "width20_80_px": 1.378989361702125,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 157.0
+      },
+      "width11_0.5": {
+        "width20_80_px": 1.6153846153846274,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 134.0
+      },
+      "width11_1": {
+        "width20_80_px": 1.5405405405405332,
+        "position50_px": 127.5,
+        "overshoot_codes": 21.0,
+        "undershoot_codes": 21.0,
+        "halo_area_code_pixels": 134.0
+      }
+    }
+  }
+}

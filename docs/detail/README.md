@@ -17,6 +17,10 @@ conservative low-contrast gate and shared RGB correction bounded by local channe
 extrema. It sharpens coherent soft transitions while limiting halos and noise
 amplification. It cannot recover missing texture or fix frame-generation geometry.
 CAS can retain more very fine texture; Detail is not a universal replacement.
+The Edge Enhancement experiments were rejected: stronger protection against
+existing halos also removed too much useful correction. The installed filter
+retains Detail with a colour-channel bug fix. Existing ringing can still widen;
+leave Focus off on inputs with visible halos. See [measured limitations](EDGE-STATUS.md).
 
 Detail chains operate on each displayed real or generated frame, including both
 intermediate phases of ×3. They use the existing post images and dispatch path.

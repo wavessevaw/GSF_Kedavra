@@ -283,7 +283,7 @@ function Content() {
     <PanelSectionRow><div style={{fontSize: 11, color: C.muted, lineHeight: 1.4}}>
       {status?.post_error || (!status?.detail ? 'Focus off. Strength alone does not enable it.' :
         status?.focus_status === 'processing' ? `Processing SDR frames: ${status.focus_frames ?? 0}. Local edge clarity, not global contrast.` :
-        status?.focus_status === 'steam_ui' ? 'Waiting for the game image; Steam UI is not filtered.' :
+        status?.focus_status === 'steam_ui' ? `Steam UI is not filtered. Game passes recorded this session: ${status.focus_frames ?? 0}.` :
         status?.focus_status === 'hdr_bypass' || status?.post_hdr_limited ? 'Bypassed: HDR source. No Focus processing.' :
         status?.focus_status === 'unsupported_source' ? 'Bypassed: unsupported game image format.' :
         status?.focus_status === 'allocation_failed' ? 'Focus could not allocate its post-processing target.' :
