@@ -16,11 +16,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: wavessevaw/GSF_Kedavra
         run: |
-          gh run watch 42761260261 --exit-status --interval 30
-          test "$(gh api repos/$GH_REPO/actions/runs/42761260261 --jq .conclusion)" = success
-          test "$(gh api repos/$GH_REPO/actions/runs/42761260261 --jq .head_sha)" = 53840cbce17e696effa8e3808fa59cdb18a1acba
-          gh run download 42761260261 --name GSF-Kedavra-Detail-Candidate --dir out
-          gh run download 42761260261 --name edge-evidence --dir evidence
+          gh run watch 42761863475 --exit-status --interval 30
+          test "$(gh api repos/$GH_REPO/actions/runs/42761863475 --jq .conclusion)" = success
+          test "$(gh api repos/$GH_REPO/actions/runs/42761863475 --jq .head_sha)" = b381816fc17b64846fdc74ac62cfb4bebfe00330
+          gh run download 42761863475 --name GSF-Kedavra-Detail-Candidate --dir out
+          gh run download 42761863475 --name edge-evidence --dir evidence
           (cd evidence && sha256sum -c Edge-Evidence.zip.sha256 && unzip -t Edge-Evidence.zip | tail -1)
           cd out
           sha256sum -c GSF-Kedavra-1.5.1-detail.4.zip.sha256
@@ -29,7 +29,7 @@ jobs:
           import json, zipfile
           with zipfile.ZipFile("GSF-Kedavra-1.5.1-detail.4.zip") as z:
               assert json.loads(z.read("KEDAVRA/package.json"))["version"] == "1.5.1-detail.4"
-              assert "53840cb" in z.read("KEDAVRA/runtime/VERSION").decode()
+              assert "b381816" in z.read("KEDAVRA/runtime/VERSION").decode()
               ui = z.read("KEDAVRA/dist/index.js").decode()
               assert "Kedavra Focus" in ui and "Processing strength" in ui
               assert "Game passes recorded this session" in ui
@@ -48,12 +48,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: wavessevaw/GSF_Kedavra
         run: |
+          cp docs/detail/Software-Dispatch.json out/Software-Dispatch.json
           TAG=v1.5.1-detail.4
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release already exists; refusing to overwrite its assets."
             exit 1
           fi
-          gh release create "$TAG" out/GSF-Kedavra-1.5.1-detail.4.zip out/GSF-Kedavra-1.5.1-detail.4.zip.sha256 out/README-Detail-Candidate.md evidence/Edge-Evidence.zip evidence/Edge-Evidence.zip.sha256 \
-            --target 53840cbce17e696effa8e3808fa59cdb18a1acba \
+          gh release create "$TAG" out/GSF-Kedavra-1.5.1-detail.4.zip out/GSF-Kedavra-1.5.1-detail.4.zip.sha256 out/README-Detail-Candidate.md out/Software-Dispatch.json evidence/Edge-Evidence.zip evidence/Edge-Evidence.zip.sha256 \
+            --target b381816fc17b64846fdc74ac62cfb4bebfe00330 \
             --title "Kedavra Focus — 1.5.1-detail.4 Test Candidate" \
             --notes-file docs/detail/DOWNLOAD.md --prerelease --latest=false
