@@ -10,9 +10,9 @@
 
 GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Gamescope, the compositor that already owns every vblank and every page flip in SteamOS Gaming Mode. A Decky plugin installs it, switches it on and off and measures the result. Since 1.3.1 it also targets the **Steam Machine** on a TV (60 or 120 Hz, games at 1080p or 4K).
 
-[**Download 1.4.4**](https://github.com/wavessevaw/GSF/releases/tag/v1.4.4) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
+[**Download 1.6.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
 
-[![Release](https://img.shields.io/github/v/release/wavessevaw/GSF?style=flat-square&color=52d64a&label=release)](https://github.com/wavessevaw/GSF/releases/latest)
+[![Release](https://img.shields.io/github/v/release/wavessevaw/GSF_Kedavra?style=flat-square&color=52d64a&label=release)](https://github.com/wavessevaw/GSF_Kedavra/releases/latest)
 [![Steam Deck](https://img.shields.io/badge/Steam%20Deck-OLED-0d1210?style=flat-square)](https://www.steamdeck.com/)
 [![Steam Machine](https://img.shields.io/badge/Steam%20Machine-TV%2060%2F120%20Hz-0d1210?style=flat-square)](#steam-machine)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-plugin-0d1210?style=flat-square)](https://decky.xyz/)
@@ -35,15 +35,16 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 - **The system image stays untouched.** The KEDAVRA Gamescope lives in `/var/lib/kedavra` and is mounted over the stock one only while the service runs. A boot that does not reach Gaming Mode returns to the stock Gamescope on the next boot.
 - **Frame pacing comes first.** A vblank-indexed scheduler decides what every refresh shows, and the game is held on a fixed cadence that generation can fill evenly.
 - **No FPS limit to set by hand.** In **Auto** the engine caps the game itself and picks the cap from the median of what the game really delivers (30, 35, 40 or 45 at 90 Hz, so x3 to x2, and 24 for x3.75 if you allow it). Or set your own base FPS with one slider.
+- **Kedavra Focus (1.6.0).** Optional adaptive edge enhancement for SDR images, with a single on/off control.
 - **Honest numbers.** The ring counts new frames on screen and the game's own frames, and the pacing record is taken from KMS page-flip timestamps, not from an FPS counter.
 
 ## Installation
 
 Requires [Decky Loader](https://decky.xyz/). Tested on SteamOS 3.8.
 
-1. Download [**GSF-Kedavra-1.4.4.zip**](https://github.com/wavessevaw/GSF/releases/download/v1.4.4/GSF-Kedavra-1.4.4.zip).
+1. Download [**GSF-Kedavra-1.6.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.6.0/GSF-Kedavra-1.6.0.zip).
 2. In Decky: **Settings → Developer → Install plugin from zip**, pick the file. Upgrading over an older KEDAVRA plugin keeps your settings.
-3. Open the plugin, go to **Setup** and press **Install Gamescope KEDAVRA**. Reboot when asked.
+3. Open the plugin, go to **Setup** and press **Reinstall Gamescope KEDAVRA**. Reboot when asked.
 4. After the reboot every check in **Setup** is green, with no line saying the installed Gamescope differs from the one in the plugin.
 
 To remove it, press **Remove and restore stock Gamescope** in **Setup**, then reboot.
@@ -72,7 +73,7 @@ The optional HUD draws three rings over the game, in the same style as [GFG Extr
 
 ## Measuring pacing
 
-**Pace → Record pacing trace** writes the KMS flip time of every refresh while you play. Stop it after one or two minutes and the plugin analyses the trace on the device. The 1.4.4 targets are:
+**Pace → Record pacing trace** writes the KMS flip time of every refresh while you play. Stop it after one or two minutes and the plugin analyses the trace on the device. The current pacing targets are:
 
 | Metric | Target |
 | --- | --- |
@@ -94,7 +95,7 @@ Since 1.3.1 the same zip installs on a Steam Machine (SteamOS Gaming Mode with D
 
 ## How it works
 
-1. Gamescope copies every new game frame into a small GPU ring. The base cap lets one game frame through per slot of the cap; since 1.4.4 each frame goes through on the next refresh as soon as it is ready, so a game just under the cap keeps the full frame rate it renders.
+1. Gamescope copies every new game frame into a small GPU ring. The base cap lets one game frame through per slot of the cap; each frame goes through on the next refresh as soon as it is ready, so a game just under the cap keeps the full frame rate it renders.
 2. Right after the frame is composited, a separate submission runs hierarchical motion estimation between it and the previous frame, split over two refreshes so it never delays a flip.
 3. On every vblank the scheduler (`kedavra/sched/kfg_sched.h`) picks a real frame or an intermediate at the right phase. Frames from a game whose presents jitter around the cap keep their place on the cap grid, so motion stays even. Since 1.4.0 the scheduler moves content in eighths of a refresh: after a late game frame the picture runs about 1.25× fast for a few refreshes instead of skipping one, and when the next frame is late it slows down evenly instead of stopping. Since 1.4.1, when the ready frames would still run out, it briefly drops to quarter speed instead of freezing. Since 1.4.2 a slow-down is not paid back with a speed-up: the picture keeps its delay and gives a refresh back after a calm second, so it no longer changes speed at every late frame. A fractional cap (40 or 35 at 90 Hz) is followed on its real 2-2-2-3 release pattern, not its mean, and the motion analysis runs in one pass when it fits, so a pair is usable one refresh after its frame arrives. Each refresh still costs one warp or one copy.
 4. The intermediate is synthesised at full resolution with occlusion-aware blending, and Gamescope flips it like any other frame. Since 1.4.3 the camera's own motion is fitted as one plane projective map (the exact image motion of a turning camera), and wherever the picture agrees, a pixel follows that map at the true phase of the turn, so the world turns as one rigid image instead of 4×4 blocks.
