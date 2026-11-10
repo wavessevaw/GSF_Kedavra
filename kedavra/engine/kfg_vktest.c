@@ -1173,6 +1173,16 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 							write_ppm(getenv("KFG_HARD_OUT"), name, T, w, h);
 						}
 					}
+					// Optional full real/intermediate sequence for post-filter comparisons.
+					// This only saves existing output; it changes no engine input or dispatch.
+					if (getenv("KFG_DETAIL_SEQUENCE_OUT") &&
+					    (!strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
+						char name[128];
+						snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_gen", s->name, mode, f, j);
+						write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, O, w, h);
+						snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_truth", s->name, mode, f, j);
+						write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, T, w, h);
+					}
 					laplace(O, w, h, HO);
 					laplace(T, w, h, HT);
 					double eo = 0, et = 0;

@@ -48,6 +48,8 @@ layout(local_size_x = 8, local_size_y = 8) in;
 
 #define S_CAS 1
 #define S_DLS 2
+#define S_DETAIL 3
+#define S_RCAS 4
 
 const vec3 LUMA709 = vec3(0.2126, 0.7152, 0.0722);
 
@@ -398,6 +400,73 @@ vec3 dls(float sharpen, float denoise)
 	return clamp(x + (acc - lx), 0.0, 1.0);
 }
 
+// Bounded CAS-derived edge enhancement, SDR only. Nine samples, one dispatch.
+// CAS-derived per-channel correction with direction weighting, smooth protection
+// and a small bounded excursion. No history, external upscaler detection or extra pass.
+vec3 detail(float strength, vec3 e)
+{
+	vec3 a = px(ivec2(-1, -1)), b = px(ivec2(0, -1)), c = px(ivec2(1, -1));
+	vec3 d = px(ivec2(-1, 0)), f = px(ivec2(1, 0));
+	vec3 g = px(ivec2(-1, 1)), h = px(ivec2(0, 1)), i = px(ivec2(1, 1));
+	float la = dot(a, LUMA709), lb = dot(b, LUMA709), lc = dot(c, LUMA709);
+	float ld = dot(d, LUMA709), le = dot(e, LUMA709), lf = dot(f, LUMA709);
+	float lg = dot(g, LUMA709), lh = dot(h, LUMA709), li = dot(i, LUMA709);
+	vec3 gx = vec3(lc-la, lf-ld, li-lg);
+	vec3 gy = vec3(lg-la, lh-lb, li-lc);
+	vec2 gradient = vec2(dot(gx, vec3(1,2,1)), dot(gy, vec3(1,2,1)));
+	float activity = dot(abs(gx) + abs(gy), vec3(1,2,1));
+	float coherence = (abs(gradient.x) + abs(gradient.y)) / max(activity, 1e-5);
+	vec2 direction = gradient * gradient;
+	direction /= max(direction.x + direction.y, 1e-5);
+	float lo = min(le, min(min(lb, ld), min(lf, lh)));
+	float hi = max(le, max(max(lb, ld), max(lf, lh)));
+	float range = hi - lo;
+	vec3 mn = min(e, min(min(b,d),min(f,h)));
+	vec3 mx = max(e, max(max(b,d),max(f,h)));
+	vec3 mn9 = min(mn,min(min(a,c),min(g,i)));
+	vec3 mx9 = max(mx,max(max(a,c),max(g,i)));
+	// CAS contrast response, guarded at black. No channel can veto another.
+	vec3 amp = sqrt(clamp(min(mn+mn9,2.0-mx-mx9)/max(mx+mx9,vec3(1e-5)),0.0,1.0));
+	vec3 w = -amp/(8.0-3.0*strength);
+	vec2 axisWeight = mix(vec2(0.5),direction,0.25);
+	vec3 residual = e - 0.5*((d+f)*axisWeight.x+(b+h)*axisWeight.y);
+	float jump = max(max(abs(le-lb),abs(le-lh)),max(abs(le-ld),abs(le-lf)));
+	float sharp = smoothstep(0.60,0.95,jump/max(range,1e-5))*smoothstep(0.08,0.30,range);
+	vec2 monotonic = vec2(abs(lf-ld)/max(abs(lf-le)+abs(le-ld),1e-5),
+	                     abs(lh-lb)/max(abs(lh-le)+abs(le-lb),1e-5));
+	float structure = mix(0.75,1.0,coherence);
+	float ringing = mix(0.75,1.0,dot(monotonic,axisWeight));
+	float gain = min(2.0*strength,1.0)*structure*ringing*(1.0-0.45*sharp)
+	           * smoothstep(0.01,0.06,range);
+	vec3 delta = residual*(-4.0*w)/(1.0+4.0*w)*gain;
+	vec3 budget = min(vec3(0.06),0.5*(mx-mn));
+	delta = clamp(delta,-budget,budget);
+	// Small bounded excursion, reduced at extrema/ringing, rather than zero-halo gating.
+	vec3 allowance = min(vec3(0.025),0.25*(mx-mn))*ringing*(1.0-0.8*sharp);
+	return clamp(e+delta,max(vec3(0),mn-allowance),min(vec3(1),mx+allowance));
+}
+
+#ifdef KFG_POST_RESEARCH
+// Adapted AMD FSR1 RCAS (MIT, THIRD_PARTY.md). Research comparator only.
+// Denoise enabled; strength linearly scales the lobe, zero is identity. Exact FP32
+// division replaces upstream reciprocal approximations; guards handle flat black/white.
+vec3 rcas(float strength)
+{
+	vec3 b = px(ivec2(0,-1)), d = px(ivec2(-1,0)), e = px(ivec2(0));
+	vec3 f = px(ivec2(1,0)), h = px(ivec2(0,1));
+	vec3 mn = min(min(b,d), min(f,h)), mx = max(max(b,d), max(f,h));
+	vec3 lobeRGB = max(-min(mn,e) / max(4.0*mx, vec3(1e-6)),
+		(1.0-max(mx,e)) / min(4.0*mn-4.0, vec3(-1e-6)));
+	float lobe = max(-0.1875, min(max(max(lobeRGB.r,lobeRGB.g),lobeRGB.b),0.0)) * strength;
+	const vec3 luma = vec3(0.5,1.0,0.5);
+	float lb=dot(b,luma), ld=dot(d,luma), le=dot(e,luma), lf=dot(f,luma), lh=dot(h,luma);
+	float span = max(le,max(max(lb,ld),max(lf,lh))) - min(le,min(min(lb,ld),min(lf,lh)));
+	float noise = clamp(abs(0.25*(lb+ld+lf+lh)-le)/max(span,1e-6),0.0,1.0);
+	lobe *= 1.0 - 0.5*noise;
+	return (e + lobe*(b+d+f+h)) / (1.0+4.0*lobe);
+}
+#endif
+
 // -------------------------------------------------------------------------------------- FXAA
 //
 // Edge-directed antialiasing in the spirit of FXAA 3.11 "quality": local contrast test, edge
@@ -525,15 +594,20 @@ void main()
 		return;
 	g_rcp = 1.0 / vec2(u_dstSize);
 	g_uv = (vec2(p) + 0.5) * g_rcp;
-	float alpha = tap(g_uv).a;
+	vec4 center = tap(g_uv);
 	vec3 c;
 	if (u_level == STAGE_GRADE)
 		c = grade(p, u_flags);
-	else if (u_level == STAGE_SHARPEN)
-		c = u_flags == S_DLS ? dls(u_lambda, u_cutThreshold) : cas(u_lambda);
+	else if (u_level == STAGE_SHARPEN) {
+		if (u_flags == S_DETAIL) c = detail(u_lambda, center.rgb);
+#ifdef KFG_POST_RESEARCH
+		else if (u_flags == S_RCAS) c = rcas(u_lambda);
+#endif
+		else c = u_flags == S_DLS ? dls(u_lambda, u_cutThreshold) : cas(u_lambda);
+	}
 	else if (u_level == STAGE_FXAA)
 		c = fxaa();
 	else
 		c = finish(p, u_flags);
-	imageStore(dst, p, vec4(c, alpha));
+	imageStore(dst, p, vec4(c, center.a));
 }

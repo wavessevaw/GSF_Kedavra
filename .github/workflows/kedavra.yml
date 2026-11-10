@@ -5,17 +5,11 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [main, release/silk-1.5.0]
-    tags: ['v*']
+    branches: [research/detail-reconstruction]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Publish the plugin as release vX.Y.Z (the tag is created on this commit if missing; main only); empty = build only'
-        required: false
-        default: ''
 permissions:
   contents: read
 jobs:
@@ -28,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
       - name: Build
-        run: make -C kedavra all
+        run: make -C kedavra all detail-lab
       - name: Scheduler unit tests and model stress matrix
         run: make -C kedavra test-pacing test-sched
       - name: Engine correctness on lavapipe
@@ -45,7 +39,9 @@ jobs:
       - name: Steam Deck bench bundle (engine on RADV)
         run: |
           mkdir -p deck-bench
-          cp kedavra/build/kfg_vktest kedavra/build/kfg_posttest kedavra/build/*.spv deck-bench/
+          cp kedavra/build/kfg_vktest kedavra/build/kfg_posttest kedavra/build/kfg_detailtest kedavra/build/*.spv deck-bench/
+          cp -r kedavra/build/research deck-bench/
+          cp kedavra/tools/detail/bench_detail.py deck-bench/
       - uses: actions/upload-artifact@v4
         with:
           name: kedavra-deck-bench
@@ -152,7 +148,7 @@ jobs:
           $R/bin/gamescopectl --help >/dev/null 2>&1 || true
 
   plugin:
-    needs: [model-and-engine, gamescope, runtime-on-older-glibc]
+    needs: [model-and-engine, gamescope, runtime-on-older-glibc, decky]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -167,43 +163,79 @@ jobs:
         with:
           name: kedavra-deck-bench
           path: deck-bench
-      - name: Plugin zip with runtime and bench
-        run: sh kedavra/decky/package.sh "$PWD/KEDAVRA.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+      - name: Full install candidate with runtime, research bench and rollback instructions
+        run: |
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.5.1-detail.4.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.5.1-detail.4.zip > GSF-Kedavra-1.5.1-detail.4.zip.sha256
+          cp docs/detail/README.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
-          name: KEDAVRA-plugin
-          path: KEDAVRA.zip
+          name: GSF-Kedavra-Detail-Candidate
+          path: |
+            GSF-Kedavra-1.5.1-detail.4.zip
+            GSF-Kedavra-1.5.1-detail.4.zip.sha256
+            README-Detail-Candidate.md
 
-  # A pushed version tag (v1.0.0) publishes the plugin zip built above as a GitHub release,
-  # with the notes in docs/releases/<tag>.md. A release already made on github.com with a new
-  # tag gets the zip and the notes added. Run by hand on main with a tag, it publishes that
-  # release, creating the tag on the commit it ran on when the tag does not exist yet.
-  release:
-    if: github.ref == 'refs/heads/release/silk-1.5.0' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') && github.ref == 'refs/heads/main')
-    needs: plugin
+  detail-lab:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: KEDAVRA-plugin
-          path: out
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref == 'refs/heads/release/silk-1.5.0' && 'v1.5.0' || (github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name) }}
+      - name: Lab dependencies
         run: |
-          v=${TAG#v}
-          cp out/KEDAVRA.zip "GSF-Kedavra-$v.zip"
-          cp "docs/releases/$TAG.md" "README-$v.md"
-          sha256sum "GSF-Kedavra-$v.zip" > "GSF-Kedavra-$v.zip.sha256"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # The release was created on github.com together with the tag: fill it in.
-            gh release upload "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" --clobber
-            gh release edit "$TAG" --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md"
-          else
-            gh release create "$TAG" "GSF-Kedavra-$v.zip" "GSF-Kedavra-$v.zip.sha256" "README-$v.md" \
-              --title "GSF $v Kedavra" --notes-file "docs/releases/$TAG.md" --target "$GITHUB_SHA"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools vulkan-validationlayers python3-numpy python3-scipy python3-pil ffmpeg
+      - name: Build and validate shaders
+        run: |
+          make -C kedavra all detail-lab
+          for f in kedavra/build/*.spv kedavra/build/research/*.spv; do
+            spirv-val --target-env vulkan1.1 --scalar-block-layout "$f"
+          done
+      - name: Vulkan validation and reproducible comparison
+        run: |
+          export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
+          KFG_VALIDATION=1 kedavra/build/kfg_posttest --spv kedavra/build 2>&1 | tee validation.log
+          ! grep -E 'Validation Error|VUID-' validation.log
+          python3 kedavra/tools/detail/fetch_references.py /tmp/detail-references
+          mkdir -p /tmp/detail-fg
+          KFG_HARD_OUT=/tmp/detail-fg KFG_HARD_X2=1 KFG_DETAIL_SEQUENCE_OUT=/tmp/detail-fg kedavra/build/kfg_vktest --spv kedavra/build --size 320x200 --hard --json hard-engine.json
+          python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv kedavra/build/research --references /tmp/detail-references --fg /tmp/detail-fg --out detail-results --bench 100 --detail-max-excursion 7
+      - name: Compare frozen Detail 2 and practical Edge configurations
+        run: |
+          export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
+          # Retrieve the exact published candidate shader, never main or a moving branch.
+          git fetch --depth 1 origin 3553eb04dc8b29e6beda5b5c88d9970c412d128a
+          git show 3553eb04dc8b29e6beda5b5c88d9970c412d128a:kedavra/shaders/kfg_post.comp > /tmp/old-post.comp
+          mkdir -p /tmp/old-spv /tmp/old-research
+          cp kedavra/build/*.spv /tmp/old-spv/
+          cp kedavra/build/research/*.spv /tmp/old-research/
+          glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders /tmp/old-post.comp -o /tmp/old-spv/kfg_post.spv
+          glslangValidator -V --target-env vulkan1.1 -DKFG_POST_RESEARCH=1 -Ikedavra/shaders /tmp/old-post.comp -o /tmp/old-research/kfg_post.spv
+          python3 kedavra/tools/detail/compare.py --exe kedavra/build/kfg_detailtest --spv /tmp/old-research --references /tmp/detail-references --fg /tmp/detail-fg --out /tmp/old-results
+          git fetch --depth 1 origin 32579d817affb9ebb8085eebe32371c55e915c28
+          git show 32579d817affb9ebb8085eebe32371c55e915c28:kedavra/shaders/kfg_post.comp > /tmp/detail3.comp
+          mkdir -p /tmp/detail3-spv
+          cp kedavra/build/*.spv /tmp/detail3-spv/
+          glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders /tmp/detail3.comp -o /tmp/detail3-spv/kfg_post.spv
+          python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv /tmp/detail3-spv --out /tmp/edge-detail3
+          python3 kedavra/tools/detail/edge_variants.py --shader kedavra/shaders/kfg_post.comp --spv kedavra/build --out /tmp/edge-variants
+          python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv kedavra/build --out /tmp/edge-fixed
+          for variant in conservative balanced strong; do
+            spirv-val --target-env vulkan1.1 --scalar-block-layout /tmp/edge-variants/$variant/kfg_post.spv
+            python3 kedavra/tools/detail/compare_edge.py --baseline /tmp/old-results --exe kedavra/build/kfg_posttest --spv /tmp/edge-variants/$variant --out /tmp/edge-$variant
+          done
+          python3 kedavra/tools/detail/probe_profiles.py --exe kedavra/build/kfg_posttest --spv kedavra/build --variant detail3=/tmp/detail3-spv --variant old=/tmp/old-spv --variant fixed=kedavra/build --variant conservative=/tmp/edge-variants/conservative --variant balanced=/tmp/edge-variants/balanced --variant strong=/tmp/edge-variants/strong --out /tmp/edge-controls
+          python3 kedavra/tools/detail/edge_evidence.py --baseline /tmp/old-results --fixed /tmp/edge-fixed --experiment detail3=/tmp/edge-detail3 --experiment conservative=/tmp/edge-conservative --experiment balanced=/tmp/edge-balanced --experiment strong=/tmp/edge-strong --controls /tmp/edge-controls --out edge-evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-evidence
+          path: |
+            edge-evidence/Edge-Evidence.zip
+            edge-evidence/Edge-Evidence.zip.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: detail-comparison-software-vulkan
+          path: |
+            detail-results
+            validation.log
+            hard-engine.json

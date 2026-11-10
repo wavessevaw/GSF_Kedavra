@@ -2,14 +2,14 @@
 //
 // KEDAVRA post-generation filters: configuration and pass plan.
 //
-// The filters run inside the composite on the frame a vblank shows, after it was picked or
-// generated, so real and generated frames get exactly the same look and motion analysis
-// never sees filtered pixels (grain or sharpening would add false motion). The HUD and the
-// Steam overlays are other layers and stay unfiltered.
+// Detail chains run inside the composite on the frame a vblank shows, after it is picked
+// or generated. Motion analysis never sees Detail. Legacy chains retain 1.5.0's source-ring
+// prefiltering when generation is active; with generation off they filter the shown frame.
+// The HUD and Steam overlays are other layers and stay unfiltered.
 //
 // Stages, each one dispatch (or three for SMAA), skipped when nothing in it is on:
 //   grade    colour looks (kfg_post.comp, level 0), fixed order below
-//   sharpen  CAS or DLS (level 1)
+//   sharpen  CAS, DLS or opt-in Detail (level 1)
 //   aa       FXAA (level 2) or SMAA (edge, weight, blend)
 //   finish   chromatic aberration, vignette, film grain (level 3)
 // Images: POST_IN -> POST[0] -> POST[1] -> POST[0] ...; the last one written is shown.
@@ -18,7 +18,7 @@
 // ReShade and vkBasalt see them; effects that need linear light convert explicitly.
 //
 // Configuration string (gamescopectl kfg_post), comma separated, empty = off:
-//   effect names (KFG_POST_EFFECTS), "cas=S", "dls=S:D", "fxaa", "smaa"
+//   effect names (KFG_POST_EFFECTS), "cas=S", "dls=S:D", "detail=S", "fxaa", "smaa"
 //   S = sharpness 0..1, D = DLS denoise 0..1. Example: "vibrance,vignette,cas=0.5,smaa".
 #ifndef KFG_POST_H
 #define KFG_POST_H
@@ -65,6 +65,10 @@ enum kfg_post_stage {
 #define KFG_SHARPEN_NONE 0
 #define KFG_SHARPEN_CAS 1
 #define KFG_SHARPEN_DLS 2
+#define KFG_SHARPEN_DETAIL 3
+#ifdef KFG_POST_RESEARCH
+#define KFG_SHARPEN_RCAS 4
+#endif
 
 #define KFG_AA_NONE 0
 #define KFG_AA_FXAA 1
@@ -113,6 +117,27 @@ static inline int kfg_post_active(const kfg_post_cfg *c)
 	return c->grade || c->finish || c->sharpen != KFG_SHARPEN_NONE || c->aa != KFG_AA_NONE;
 }
 
+// Detail is evaluated on each displayed frame, never on the motion-analysis input.
+// Legacy presets retain their 1.5.0 placement before generation.
+static inline int kfg_post_after_generation(const kfg_post_cfg *c)
+{
+	return c->sharpen == KFG_SHARPEN_DETAIL;
+}
+
+static inline kfg_post_cfg kfg_post_for_transfer(kfg_post_cfg c, int transfer)
+{
+	if (transfer == KFG_TRANSFER_SCRGB)
+		memset(&c, 0, sizeof(c)); // Existing bypass: preserve negative/over-range linear light.
+	else if (transfer == KFG_TRANSFER_PQ) {
+		c.grade = 0;
+		// Detail's SDR noise thresholds have not been validated for PQ. Keep HDR untouched
+		// by this new effect; explicitly requested legacy effects still behave as before.
+		if (c.sharpen == KFG_SHARPEN_DETAIL)
+			c.sharpen = KFG_SHARPEN_NONE;
+	}
+	return c;
+}
+
 static inline float kfg_post_unit(const char *s, int *ok)
 {
 	char *end = NULL;
@@ -159,7 +184,18 @@ static inline int kfg_post_parse(const char *spec, kfg_post_cfg *out, char *err,
 		}
 		if (known)
 			continue;
-		if (!strncmp(tok, "cas=", 4)) {
+		if (!strncmp(tok, "detail=", 7)) {
+			char *tail = NULL;
+			double value = strtod(tok + 7, &tail);
+			ok = tail != tok + 7 && !*tail && value >= 0.0 && value <= 1.0;
+			c.sharpness = (float)value;
+			c.sharpen = value == 0.0 ? KFG_SHARPEN_NONE : KFG_SHARPEN_DETAIL;
+#ifdef KFG_POST_RESEARCH
+		} else if (!strncmp(tok, "rcas=", 5)) {
+			c.sharpen = KFG_SHARPEN_RCAS;
+			c.sharpness = kfg_post_unit(tok + 5, &ok);
+#endif
+		} else if (!strncmp(tok, "cas=", 4)) {
 			c.sharpen = KFG_SHARPEN_CAS;
 			c.sharpness = kfg_post_unit(tok + 4, &ok);
 		} else if (!strncmp(tok, "dls=", 4)) {

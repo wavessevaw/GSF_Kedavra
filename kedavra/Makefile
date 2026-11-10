@@ -17,6 +17,13 @@ SPV = $(SHADERS:%=$(BUILD)/%.spv)
 
 all: $(BUILD)/kfg_sim $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
 
+# RCAS exists only in this comparison binary/shader, not the installed Gamescope.
+detail-lab: all
+	$(CC) $(CFLAGS) $(WARN) -std=c11 -DKFG_POST_RESEARCH -Iengine -o $(BUILD)/kfg_detailtest engine/kfg_posttest.c engine/kfg_vk.c -lvulkan -lm
+	mkdir -p $(BUILD)/research
+	cp $(SPV) $(BUILD)/research/
+	$(GLSLANG) -V --target-env vulkan1.1 -DKFG_POST_RESEARCH=1 -Ishaders -o $(BUILD)/research/kfg_post.spv shaders/kfg_post.comp
+
 $(BUILD):
 	mkdir -p $(BUILD)
 
@@ -35,7 +42,7 @@ $(BUILD)/test_auto: sched/test_auto.c sched/kfg_auto.h sched/kfg_sched.h | $(BUI
 $(BUILD)/kfg_vktest: engine/kfg_vktest.c engine/kfg_vk.c engine/kfg_vk.h engine/kfg_plan.h | $(BUILD)
 	$(CC) $(CFLAGS) $(WARN) -std=c11 -Iengine -o $@ engine/kfg_vktest.c engine/kfg_vk.c -lvulkan -lm
 
-$(BUILD)/kfg_posttest: engine/kfg_posttest.c engine/kfg_vk.c engine/kfg_vk.h engine/kfg_plan.h engine/kfg_post.h engine/kfg_smaa_tex.h | $(BUILD)
+$(BUILD)/kfg_posttest: engine/kfg_posttest.c engine/kfg_post_batch.h engine/kfg_vk.c engine/kfg_vk.h engine/kfg_plan.h engine/kfg_post.h engine/kfg_smaa_tex.h | $(BUILD)
 	$(CC) $(CFLAGS) $(WARN) -std=c11 -Iengine -o $@ engine/kfg_posttest.c engine/kfg_vk.c -lvulkan -lm
 
 $(BUILD)/test_completion_bridge: sched/test_completion_bridge.c sched/kfg_sched.h | $(BUILD)
@@ -65,4 +72,4 @@ bench: $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-pacing test-sched test-engine bench clean
+.PHONY: all detail-lab test test-pacing test-sched test-engine bench clean

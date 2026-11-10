@@ -34,6 +34,16 @@ if [ -n "$BENCH" ]; then
 		cp "$BENCH/kfg_posttest" "$P/bench/"
 		chmod +x "$P/bench/kfg_posttest"
 	fi
+	if [ -f "$BENCH/kfg_detailtest" ]; then
+		cp "$BENCH/kfg_detailtest" "$P/bench/"
+		cp -r "$BENCH/research" "$P/bench/"
+		cp ../tools/detail/bench_detail.py "$P/bench/"
+		chmod +x "$P/bench/kfg_detailtest"
+	fi
+fi
+if [ -f ../../docs/detail/README.md ]; then
+	mkdir -p "$P/docs/detail"
+	cp ../../docs/detail/*.md ../../docs/detail/*.json "$P/docs/detail/"
 fi
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"

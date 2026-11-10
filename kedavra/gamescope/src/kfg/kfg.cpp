@@ -188,6 +188,8 @@ namespace kfg
 		int nPostTransfer = KFG_TRANSFER_SDR;  // of the post images
 		bool bPostLimited = false;  // HDR frame: colour looks left out (last filtered frame)
 		uint64_t ulPostFrames = 0, ulPostSkipped = 0;
+		uint64_t ulFocusFrames = 0;
+		const char *pszFocusStatus = "off";
 		double flPostUsLast = 0, flPostUsSum = 0;
 		uint64_t ulPostSamples = 0;
 	};
@@ -717,6 +719,7 @@ namespace kfg
 		const std::string sSpec = CvarCopy( g_sPost );
 		if ( sSpec == s.sPostSpec )
 			return;
+		const bool bWasAfter = kfg_post_after_generation( &s.post );
 		s.sPostSpec = sSpec;
 		char szErr[ 128 ];
 		if ( kfg_post_parse( sSpec.c_str(), &s.post, szErr, sizeof( szErr ) ) != 0 )
@@ -729,6 +732,9 @@ namespace kfg
 			s.sPostError.clear();
 			kfg_log.infof( "filters: %s", sSpec.empty() ? "off" : sSpec.c_str() );
 		}
+		if ( bWasAfter != bool( kfg_post_after_generation( &s.post ) ) )
+			ResetHistory( s, "post placement change" ); // Never mix prefiltered and raw ring frames.
+		s.pszFocusStatus = kfg_post_after_generation( &s.post ) ? "waiting" : "off";
 		if ( !kfg_post_active( &s.post ) )
 		{
 			// Off: free the images (the SMAA tables are small and stay).
@@ -805,12 +811,7 @@ namespace kfg
 	// scRGB is linear with values above 1.0: no filter is made for it, shown unfiltered.
 	static kfg_post_cfg PostFor( const kfg_post_cfg &cfg, int nTransfer )
 	{
-		kfg_post_cfg c = cfg;
-		if ( nTransfer == KFG_TRANSFER_SCRGB )
-			c = kfg_post_cfg{};
-		else if ( nTransfer == KFG_TRANSFER_PQ )
-			c.grade = 0;
-		return c;
+		return kfg_post_for_transfer( cfg, nTransfer );
 	}
 
 	// Filters on layer 0. With pInto the result is copied there (a ring frame: the game's own
@@ -821,7 +822,8 @@ namespace kfg
 		const uint32_t uWidth = layer0.tex->width(), uHeight = layer0.tex->height();
 		const int nTransfer = SourceTransfer( layer0 );
 		const kfg_post_cfg post = PostFor( s.post, nTransfer );
-		s.bPostLimited = nTransfer != KFG_TRANSFER_SDR && post.grade != s.post.grade;
+		s.bPostLimited = nTransfer != KFG_TRANSFER_SDR &&
+			( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 		if ( !kfg_post_active( &post ) )
 		{
 			s.ulPostSkipped++;
@@ -831,6 +833,7 @@ namespace kfg
 		{
 			s.ulPostSkipped++;
 			s.pszLastProblem = "post_allocation_failed";
+			if ( kfg_post_after_generation( &post ) ) s.pszFocusStatus = "allocation_failed";
 			return false;
 		}
 		if ( post.aa == KFG_AA_SMAA )
@@ -850,6 +853,10 @@ namespace kfg
 		else
 			layer0.tex = s.pPost[ nRing ].get();
 		s.ulPostFrames++;
+		if ( kfg_post_after_generation( &post ) ) {
+			s.ulFocusFrames++;
+			s.pszFocusStatus = "processing";
+		}
 		return true;
 	}
 
@@ -983,7 +990,7 @@ namespace kfg
 			"\"post\":\"%s\",\"post_active\":%s,\"post_error\":\"%s\",\"post_frames\":%" PRIu64 ",\"post_skipped\":%" PRIu64 ","
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
-			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u}\n",
+			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1001,7 +1008,7 @@ namespace kfg
 			s.flPostUsLast, s.ulPostSamples ? s.flPostUsSum / double( s.ulPostSamples ) : 0.0,
 			s.flAnalysisUsLast, s.ulAnalysisPairs ? s.flAnalysisUsSum / double( s.ulAnalysisPairs ) : 0.0, s.ulAnalysisPairs,
 			cv_kfg_hdr ? "true" : "false", kfg_transfer_names[ s.nTransfer ], s.bPostLimited ? "true" : "false",
-			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight );
+			asz[ 0 ], asz[ 1 ], s.bVRRHeld ? "true" : "false", g_Hud.uOutputHeight, s.pszFocusStatus, s.ulFocusFrames );
 		fclose( f );
 		rename( sTmp.c_str(), sPath.c_str() );
 	}
@@ -1107,14 +1114,29 @@ namespace kfg
 			if ( bSteamUI )
 				ResetHistory( s, "steam ui" );
 		}
-		if ( bSteamUI )
+		if ( bSteamUI ) {
+			if ( kfg_post_after_generation( &s.post ) ) s.pszFocusStatus = "steam_ui";
 			return;
+		}
 		// Filters apply to the game's frames whether generation is on or not.
 		if ( kfg_post_active( &s.post ) )
 		{
 			const int nTransfer = pFrameInfo->layers.count() ? SourceTransfer( pFrameInfo->layers.get( 0 ) ) : -1;
 			const kfg_post_cfg post = PostFor( s.post, nTransfer );
+			s.bPostLimited = nTransfer != KFG_TRANSFER_SDR &&
+				( post.grade != s.post.grade || post.sharpen != s.post.sharpen || post.aa != s.post.aa || post.finish != s.post.finish );
 			s.bPostPending = nTransfer >= 0 && kfg_post_active( &post );
+			if ( kfg_post_after_generation( &s.post ) )
+			{
+				// SourceTransfer also returns -1 for HDR when kfg_hdr is off.
+				// Identify the bypass reason from our own layer metadata, not a
+				// generic post-limited flag (which includes unsupported SDR formats).
+				const bool bHdrSource = pFrameInfo->layers.count() &&
+					( pFrameInfo->layers.get( 0 ).colorspace == GAMESCOPE_APP_TEXTURE_COLORSPACE_HDR10_PQ ||
+					  pFrameInfo->layers.get( 0 ).colorspace == GAMESCOPE_APP_TEXTURE_COLORSPACE_SCRGB );
+				s.pszFocusStatus = bHdrSource ? "hdr_bypass" :
+					nTransfer < 0 ? "unsupported_source" : "waiting";
+			}
 			if ( !s.bPostPending )
 				s.ulPostSkipped++;  // scRGB, kfg_hdr off or an unusual format: shown unfiltered
 		}
@@ -1281,7 +1303,7 @@ namespace kfg
 			// With filters on, the game's frame is filtered once on its way into the ring: real
 			// and generated frames then come out filtered, and the filters cost once per game
 			// frame instead of once per displayed frame (x3.75: a quarter as often).
-			if ( !s.bPostPending || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
+			if ( !s.bPostPending || kfg_post_after_generation( &s.post ) || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
 				RecordCopy( pCmd, layer0.tex, cur.pColor.get() );
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
@@ -1349,7 +1371,7 @@ namespace kfg
 		layer0.tex = pShow;
 		s.pLastShown = pShow;
 		s.ulApplied++;
-		s.bShownFiltered = s.bPostPending;  // ring frames and outputs made from them are filtered
+		s.bShownFiltered = s.bPostPending && !kfg_post_after_generation( &s.post );
 	}
 
 	void RecordComposite( CVulkanCmdBuffer *pCmd, FrameInfo_t *pFrameInfo )

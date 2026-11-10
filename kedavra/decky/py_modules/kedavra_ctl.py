@@ -8,6 +8,8 @@ The engine runs inside the patched Gamescope. This module only:
   * starts and stops KMS-flip trace captures and analyses them with kfg_pacing.
 """
 import json
+import math
+import re
 import os
 import shutil
 import subprocess
@@ -32,6 +34,7 @@ class Control:
         self.sleep = sleep
         self.capture = None  # {"path": str, "started": float, "mult": int}
         self.uid = uid
+        self._detail_restore = []
         # The KEDAVRA gamescopectl speaks the same protocol; prefer it once installed.
         self.ctl_candidates = [Path("/var/lib/kedavra/runtime/bin/gamescopectl")]
 
@@ -116,6 +119,59 @@ class Control:
         return {"x375": bool(settings.get("x375")), "hdr": bool(settings.get("hdr"))}
 
     # ------------------------------------------------------------ capture
+
+    @staticmethod
+    def sharpen_tokens(spec):
+        return [t for t in re.split(r"[, ]+", spec) if t.startswith(("cas=", "dls=", "detail="))]
+
+    @classmethod
+    def detail_enabled(cls, spec):
+        sharp = cls.sharpen_tokens(spec)
+        if not sharp or not sharp[-1].startswith("detail="):
+            return False
+        try:
+            return float(sharp[-1][7:]) > 0
+        except ValueError:
+            return False
+
+    def set_detail(self, enabled, strength):
+        """Apply Focus live, keeping other effects; wait for compositor acknowledgement."""
+        strength = float(strength)
+        if not math.isfinite(strength) or not 0 <= strength <= 1:
+            raise ValueError("Focus strength must be between 0 and 1")
+        st = self.status()
+        if not st.get("fresh") or "post" not in st:
+            raise RuntimeError("Start Gamescope KEDAVRA before changing Focus")
+        before = st["post"]
+        tokens = [t for t in re.split(r"[, ]+", before) if t]
+        sharp = self.sharpen_tokens(before)
+        other = [t for t in tokens if t not in sharp]
+        restore = self._detail_restore
+        if enabled and strength > 0:
+            if not self.detail_enabled(before):
+                restore = [t for t in sharp if not t.startswith("detail=")]
+            wanted = ",".join(other + [f"detail={strength:.3f}"])
+        elif sharp and sharp[-1].startswith("detail="):
+            wanted = ",".join(other + restore)
+        else:
+            wanted = before  # Another controller's CAS/DLS must not be disabled.
+        if wanted != before:
+            self._ctl("kfg_post", wanted)
+            for _ in range(15):
+                self.sleep(0.2)
+                now = self.status()
+                if now.get("fresh") and now.get("post") == wanted:
+                    if now.get("post_error"):
+                        self._ctl("kfg_post", before)
+                        raise RuntimeError("Focus was rejected by this runtime; reinstall the candidate and reboot")
+                    break
+            else:
+                # Never overwrite a different setting from another controller.
+                if now.get("post") in (before, wanted):
+                    self._ctl("kfg_post", before)
+                raise RuntimeError("Gamescope did not confirm Focus; check the active runtime")
+        self._detail_restore = restore if enabled and strength > 0 else []
+        return {"detail": self.detail_enabled(wanted), "detail_strength": strength, "post": wanted}
 
     def _capture_info(self):
         if not self.capture:

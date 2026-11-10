@@ -1,0 +1,33 @@
+{
+  "device": "llvmpipe (LLVM 19.1.7, 256 bits) (llvmpipe Mesa 25.0.7-2+deb13u1 (LLVM 19.1.7))",
+  "steam_deck_validated": false,
+  "temporal": {
+    "analytic_photo_pan": {
+      "off": {
+        "correction_delta_rms_codes": 0.0,
+        "worst": 0.0
+      },
+      "cas": {
+        "correction_delta_rms_codes": 1.0983288209302096,
+        "worst": 1.1147935877724733
+      },
+      "dls": {
+        "correction_delta_rms_codes": 1.3653664520112105,
+        "worst": 1.4098605550817394
+      },
+      "rcas": {
+        "correction_delta_rms_codes": 0.5019171714019022,
+        "worst": 0.5089626550816185
+      },
+      "detail": {
+        "correction_delta_rms_codes": 1.4115268965355205,
+        "worst": 1.509040293100609
+      },
+      "detail_max": {
+        "correction_delta_rms_codes": 2.2589864532026693,
+        "worst": 2.3816865587229605
+      }
+    }
+  },
+  "note": "Rejected initial gain=1.5: larger correction modulation than CAS on analytical pan. This proxy is not perceptual flicker validation."
+}

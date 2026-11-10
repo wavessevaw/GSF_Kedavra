@@ -44,6 +44,21 @@ static void test_parse(void)
 	CHECK(kfg_post_parse("cas=1.5", &c, err, sizeof(err)) == -1, "sharpness above 1 rejected");
 	CHECK(kfg_post_parse("cas=", &c, err, sizeof(err)) == -1, "empty sharpness rejected");
 	CHECK(kfg_post_parse("cas=nan", &c, err, sizeof(err)) == -1, "nan sharpness rejected");
+	CHECK(kfg_post_parse("detail=0.6", &c, err, sizeof(err)) == 0 && c.sharpen == KFG_SHARPEN_DETAIL &&
+	      fabsf(c.sharpness - 0.6f) < 1e-6f, "detail intensity");
+	CHECK(kfg_post_after_generation(&c), "detail runs after generation");
+	kfg_post_cfg hdr = kfg_post_for_transfer(c, KFG_TRANSFER_PQ);
+	CHECK(!kfg_post_active(&hdr), "detail bypasses PQ until validated");
+	hdr = kfg_post_for_transfer(c, KFG_TRANSFER_SCRGB);
+	CHECK(!kfg_post_active(&hdr), "scRGB bypass retains signed HDR values");
+	CHECK(kfg_post_parse("detail=0", &c, err, sizeof(err)) == 0 && !kfg_post_active(&c), "detail zero is off");
+	const char *invalid[] = { "detail=nan", "detail=inf", "detail=-0.1", "detail=1.1", "detail=", "detail=0.5junk", "detail=0.5:0.2" };
+	for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++)
+		CHECK(kfg_post_parse(invalid[i], &c, err, sizeof(err)) == -1 && !kfg_post_active(&c), "reject %s", invalid[i]);
+	kfg_post_parse("vibrance,cas=0.5,fxaa,vignette", &c, err, sizeof(err));
+	hdr = kfg_post_for_transfer(c, KFG_TRANSFER_PQ);
+	CHECK(hdr.grade == 0 && hdr.sharpen == KFG_SHARPEN_CAS && hdr.aa == c.aa && hdr.finish == c.finish,
+	      "legacy PQ effects preserved");
 	char longs[600];
 	memset(longs, 'a', sizeof(longs) - 1);
 	longs[sizeof(longs) - 1] = 0;
@@ -82,6 +97,12 @@ static void test_plan(void)
 	}
 	kfg_post_parse("fxaa", &c, err, sizeof(err));
 	CHECK(kfg_plan_post(&p, 64, 64, &c, 0.0f) == 0 && p.n == 1, "fxaa alone: one pass into POST[0]");
+	kfg_post_parse("detail=0", &c, err, sizeof(err));
+	CHECK(kfg_plan_post(&p, 67, 49, &c, 0.0f) == -1 && p.n == 0, "detail zero dispatches nothing");
+	kfg_post_parse("cas=0.4,detail=0.6", &c, err, sizeof(err));
+	CHECK(kfg_plan_post(&p, 67, 49, &c, 0.0f) == 0 && p.n == 1 && p.pass[0].params.flags == KFG_SHARPEN_DETAIL,
+	      "detail replaces CAS, never stacks");
+	CHECK(p.pass[0].groups[0] == 9 && p.pass[0].groups[1] == 7, "odd dimensions covered");
 }
 
 // ---- GPU resources ------------------------------------------------------------------------
@@ -144,8 +165,10 @@ static int run_post(post_env *e, const char *spec, float phase, uint8_t *img, do
 	}
 	kfg_plan p;
 	int ring = kfg_plan_post(&p, e->w, e->h, &c, phase);
-	if (ring < 0)
+	if (ring < 0) {
+		if (total_ns) *total_ns = 0;
 		return 0;
+	}
 	if (kfg_vk_upload_rgba8(e->vk, &e->in, img))
 		return -1;
 	kfg_vk_begin(e->vk);
@@ -504,6 +527,42 @@ static void test_sharpen(post_env *e, const char *spec)
 	free(img);
 }
 
+static void test_detail(post_env *e)
+{
+	size_t n = (size_t)e->w * e->h;
+	uint8_t *src = malloc(n*4), *out = malloc(n*4);
+	const uint8_t profile[] = {65, 65, 80, 110, 145, 175, 190, 190};
+	for (uint32_t y = 0; y < e->h; y++)
+		for (uint32_t x = 0; x < e->w; x++) {
+			int j = (int)x - (int)e->w/2 + 4;
+			uint8_t v = profile[j < 0 ? 0 : j > 7 ? 7 : j];
+			size_t i = (size_t)y*e->w+x;
+			src[4*i] = src[4*i+1] = src[4*i+2] = v; src[4*i+3] = (uint8_t)(i%256);
+		}
+	memcpy(out, src, n*4);
+	CHECK(!run_post(e, "detail=0", 0, out, NULL) && !memcmp(src, out, n*4), "detail=0 byte-exact RGBA bypass");
+	CHECK(!run_post(e, "detail=1", 0, out, NULL), "detail dispatch");
+	size_t m = (size_t)(e->h/2)*e->w + e->w/2;
+	CHECK(out[4*m]-out[4*(m-1)] > src[4*m]-src[4*(m-1)], "detail steepens soft edge interior");
+	for (size_t i=0; i<n; i++) {
+		// Revised contract: bounded excursion (0.025 encoded units), not zero ringing.
+		CHECK(out[4*i] >= 58 && out[4*i] <= 197, "detail exceeds bounded excursion at %zu", i);
+		CHECK(out[4*i+3] == src[4*i+3], "detail changes alpha at %zu", i);
+	}
+	// Regression: a constant blue channel used to cancel sharpening in red/green.
+	for (size_t i=0; i<n; i++) src[4*i+2] = 0;
+	memcpy(out, src, n*4);
+	CHECK(!run_post(e, "detail=1", 0, out, NULL), "constant-channel detail dispatch");
+	CHECK(out[4*m]-out[4*(m-1)] > src[4*m]-src[4*(m-1)], "constant blue must not suppress red contour");
+	for (size_t i=0; i<n; i++) CHECK(out[4*i+2] == 0, "constant channel changed");
+	// Already hard boundaries must not acquire ringing. Flat black/white must stay finite.
+	for (size_t i=0; i<n; i++)
+		src[4*i] = src[4*i+1] = src[4*i+2] = i % e->w < e->w/2 ? 0 : 255;
+	memcpy(out, src, n*4);
+	CHECK(!run_post(e, "detail=1", 0, out, NULL) && !memcmp(src, out, n*4), "hard black/white edge unchanged");
+	free(src); free(out);
+}
+
 static void test_finish(post_env *e)
 {
 	uint32_t w = e->w, h = e->h;
@@ -547,16 +606,20 @@ static const struct { const char *name, *spec; } PRESETS[] = {
 			"bleach_bypass,sepia,noir,monochrome,nostalgia,dls=0.5:0.17,smaa,chromatic_aberration,vignette,film_grain" },
 };
 
+#include "kfg_post_batch.h"
+
 int main(int argc, char **argv)
 {
 	const char *spv = "build";
+	const char *batch = NULL;
 	int w = 320, h = 200, bench = 0, bw = 1280, bh = 800;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--spv") && i + 1 < argc) spv = argv[++i];
+		else if (!strcmp(argv[i], "--batch") && i + 1 < argc) batch = argv[++i];
 		else if (!strcmp(argv[i], "--bench") && i + 1 < argc) bench = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--bench-size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &bw, &bh);
 		else {
-			fprintf(stderr, "usage: kfg_posttest [--spv DIR] [--bench N] [--bench-size WxH]\n");
+			fprintf(stderr, "usage: kfg_posttest [--spv DIR] [--bench N] [--bench-size WxH] [--batch FILE]\n");
 			return 2;
 		}
 	}
@@ -570,6 +633,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	printf("device: %s (%s)\n", vk.device_name, vk.driver_info);
+	if (batch) {
+		int status = post_batch(&vk, batch);
+		kfg_vk_destroy(&vk);
+		return status || g_fail;
+	}
 	post_env e;
 	if (env_init(&e, &vk, (uint32_t)w, (uint32_t)h)) {
 		fprintf(stderr, "post images failed\n");
@@ -587,13 +655,14 @@ int main(int argc, char **argv)
 	test_hdr_flat(&e);
 
 	printf("detail effects on a flat image\n");
-	const char *flat[] = { "clarity", "cartoon", "deband", "cas=1", "dls=1:0.17", "fxaa", "smaa", "chromatic_aberration" };
+	const char *flat[] = { "clarity", "cartoon", "deband", "cas=1", "dls=1:0.17", "detail=1", "detail=0", "fxaa", "smaa", "chromatic_aberration" };
 	for (size_t i = 0; i < sizeof(flat) / sizeof(flat[0]); i++)
 		test_flat_identity(&e, flat[i], !strcmp(flat[i], "deband") ? 1 : 0);
 
 	printf("sharpening and antialiasing\n");
 	test_sharpen(&e, "cas=0.5");
 	test_sharpen(&e, "dls=0.5:0.17");
+	test_detail(&e);
 	test_aa(&e, "fxaa");
 	test_aa(&e, "smaa");
 	printf("finish\n");
