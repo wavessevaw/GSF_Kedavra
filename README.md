@@ -12,7 +12,7 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 
 [**Download 1.6.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
 
-[![Release](https://img.shields.io/github/v/release/wavessevaw/GSF_Kedavra?style=flat-square&color=52d64a&label=release)](https://github.com/wavessevaw/GSF_Kedavra/releases/latest)
+[![Release](https://img.shields.io/badge/release-1.6.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0)
 [![Steam Deck](https://img.shields.io/badge/Steam%20Deck-OLED-0d1210?style=flat-square)](https://www.steamdeck.com/)
 [![Steam Machine](https://img.shields.io/badge/Steam%20Machine-TV%2060%2F120%20Hz-0d1210?style=flat-square)](#steam-machine)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-plugin-0d1210?style=flat-square)](https://decky.xyz/)
