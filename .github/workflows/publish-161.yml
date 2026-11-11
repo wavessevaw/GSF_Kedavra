@@ -1,0 +1,51 @@
+name: Publish standalone GSF Kedavra 1.6.1
+on:
+  push:
+    branches: [integration/gfg-3.4.1]
+    paths: [.github/workflows/publish-161.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: wavessevaw/GSF_Kedavra
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify standalone package from its original GSF build
+        run: |
+          test "$(gh api repos/$GH_REPO/actions/runs/42986462137 --jq .head_sha)" = c3b60e75a0344e455434c199533f4652b23b7914
+          test "$(gh api repos/$GH_REPO/actions/runs/42986462137 --jq .conclusion)" = success
+          gh run download 42986462137 --name GSF-Kedavra-Detail-Candidate --dir out
+          (cd out && sha256sum -c GSF-Kedavra-1.6.1.zip.sha256)
+          python3 - <<'PY'
+          import json,zipfile
+          with zipfile.ZipFile('out/GSF-Kedavra-1.6.1.zip') as z:
+              assert z.testzip() is None
+              assert json.loads(z.read('KEDAVRA/package.json'))['version']=='1.6.1'
+              assert z.read('KEDAVRA/runtime/VERSION').decode().strip()=='kedavra-c3b60e7'
+              assert 'KEDAVRA/py_modules/kedavra_controller.py' in z.namelist()
+              assert z.getinfo('KEDAVRA/runtime/bin/gamescope').file_size>1000000
+          PY
+          cat > out/README-1.6.1.md <<'EOF'
+          # GSF Kedavra 1.6.1
+
+          - Adds compositor HUD touch input and native frame interval telemetry for the GFG Extreme 3.4.1 in-game Benchmark.
+          - Adds controller ownership handoff: standalone Kedavra pauses its HUD and controller commands while a compatible GFG Extreme session owns Gamescope.
+          - Preserves the 1.6.0 Focus shader, optical flow, frame warping and Silk scheduler.
+
+          **Install:** Decky Loader -> Install Plugin from ZIP. If also using GFG Extreme 3.4.1, update both plugins, then install/reinstall the Gamescope runtime from GFG Setup and reboot once. Do not overwrite GFG's runtime afterward using the standalone installer.
+
+          Software CI and virtual runtime checks do not constitute Steam Deck hardware validation.
+          EOF
+      - name: Publish from source commit in the correct repository
+        run: |
+          if gh release view v1.6.1 >/dev/null 2>&1; then
+            echo 'Version already published; refusing to overwrite.'
+            exit 1
+          fi
+          gh release create v1.6.1 out/GSF-Kedavra-1.6.1.zip out/GSF-Kedavra-1.6.1.zip.sha256 out/README-1.6.1.md \
+            --target c3b60e75a0344e455434c199533f4652b23b7914 \
+            --title 'GSF Kedavra 1.6.1' --notes-file out/README-1.6.1.md --latest
