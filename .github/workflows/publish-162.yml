@@ -1,0 +1,42 @@
+name: Publish standalone GSF Kedavra 1.6.2
+on:
+  push:
+    branches: [distribution/1.6.2]
+    paths: [.github/workflows/publish-162.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: wavessevaw/GSF_Kedavra
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify standalone package from its original GSF build
+        run: |
+          gh run watch 43119573447 --exit-status --interval 30
+          test "$(gh api repos/$GH_REPO/actions/runs/43119573447 --jq .head_sha)" = b063186c0218ec457a15433055df1c6268e25922
+          test "$(gh api repos/$GH_REPO/actions/runs/43119573447 --jq .conclusion)" = success
+          gh run download 43119573447 --name GSF-Kedavra-Detail-Candidate --dir out
+          (cd out && sha256sum -c GSF-Kedavra-1.6.2.zip.sha256)
+          python3 - <<'PY'
+          import json,zipfile
+          with zipfile.ZipFile('out/GSF-Kedavra-1.6.2.zip') as z:
+              assert z.testzip() is None
+              assert json.loads(z.read('KEDAVRA/package.json'))['version']=='1.6.2'
+              assert z.read('KEDAVRA/runtime/VERSION').decode().strip()=='kedavra-b063186'
+              assert 'KEDAVRA/py_modules/kedavra_controller.py' in z.namelist()
+              assert z.getinfo('KEDAVRA/runtime/bin/gamescope').file_size>1000000
+          PY
+          cp RELEASE_DESCRIPTION_V1_6_2.md out/README-1.6.2.md
+      - name: Publish from source commit in the correct repository
+        run: |
+          if gh release view v1.6.2 >/dev/null 2>&1; then
+            echo 'Version already published; refusing to overwrite.'
+            exit 1
+          fi
+          gh release create v1.6.2 out/GSF-Kedavra-1.6.2.zip out/GSF-Kedavra-1.6.2.zip.sha256 out/README-1.6.2.md \
+            --target b063186c0218ec457a15433055df1c6268e25922 \
+            --title 'GSF Kedavra 1.6.2' --notes-file out/README-1.6.2.md --latest
