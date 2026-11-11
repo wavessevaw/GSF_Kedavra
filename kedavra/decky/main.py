@@ -93,13 +93,17 @@ class Plugin:
         await asyncio.to_thread(self.controller_lease.release)
 
     async def _uninstall(self):
-        if not await asyncio.to_thread(self.controller_lease.active):
-            return  # GFG owns the shared runtime; removing this panel must not remove it.
+        # Decky can call uninstall after unload has closed the original lease.
+        lease = self.controller_lease if not self.controller_lease.closed else ControllerLease("gsf")
+        if not await asyncio.to_thread(lease.active):
+            return  # GFG owns the shared runtime.
+        self.controller_lease = lease
+        self.ctl.controller_lease = lease
         try:
             await asyncio.to_thread(self.ctl.set_multiplier, 0)
-        except Exception:
-            pass
-        await asyncio.to_thread(self._runtime_action, self.inst.uninstall)
+            await asyncio.to_thread(self._runtime_action, self.inst.uninstall)
+        finally:
+            await asyncio.to_thread(lease.release)
 
     async def get_hud(self):
         return {"hud": bool(self.settings.get("hud"))}
