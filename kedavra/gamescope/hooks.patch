@@ -297,3 +297,45 @@ index 397a112..6fa5617 100644
  			const bool bForceSyncFlip = bForceRepaint || is_fading_out( pPaintFocus );
  
  			// If we are compositing, always force sync flips because we currently wait
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -2,6 +2,7 @@
+ #define _GNU_SOURCE 1
+ 
+ #include <assert.h>
++#include "kfg/kfg_hud_input.hpp"
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <pthread.h>
+@@ -3355,6 +3356,10 @@
+ void wlserver_touchmotion( double x, double y, int touch_id, uint32_t time, bool bAlwaysWarpCursor, gamescope::IBackendConnector* connector )
+ {
+ 	assert( wlserver_is_lock_held() );
++	double hx=x, hy=y;
++	if (connector) apply_touchscreen_orientation(connector->GetCurrentOrientation(), &hx, &hy);
++	if (kfg::hud_input::touch(1, hx*g_nOutputWidth, hy*g_nOutputHeight, touch_id)) return;
++
+ 
+ 	if ( wlserver.mouse_focus_surface != NULL )
+ 	{
+@@ -3415,6 +3420,10 @@
+ void wlserver_touchdown( double x, double y, int touch_id, uint32_t time, gamescope::IBackendConnector* connector )
+ {
+ 	assert( wlserver_is_lock_held() );
++	double hx=x, hy=y;
++	if (connector) apply_touchscreen_orientation(connector->GetCurrentOrientation(), &hx, &hy);
++	if (kfg::hud_input::touch(0, hx*g_nOutputWidth, hy*g_nOutputHeight, touch_id)) return;
++
+ 
+ 	if ( wlserver.mouse_focus_surface != NULL )
+ 	{
+@@ -3474,6 +3483,8 @@
+ void wlserver_touchup( int touch_id, uint32_t time )
+ {
+ 	assert( wlserver_is_lock_held() );
++	if (kfg::hud_input::touch(2, 0, 0, touch_id)) return;
++
+ 
+ 	// Release whatever the touch pressed even if its surface is gone, or the seat keeps the button down.
+ 	bool bReleasedAny = false;
