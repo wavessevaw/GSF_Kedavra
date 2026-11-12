@@ -1,0 +1,101 @@
+name: GSF Native FG3 GPU LMC Regression (software)
+# Reinstates the correctness gate from GFG-Extreme/.github/workflows/gfg-native-no-dll.yml.
+# The original async LMC 8-frame test failed on 2026-10-17 with
+# real=8 synthetic=8 skipped=6 verify_checks=0. This is NOT a performance benchmark.
+on:
+  pull_request:
+    paths:
+      - engine/gfg-native/**
+      - engine/gfg-temporal/**
+      - .github/workflows/gsf-native-lmc-gpu-validation.yml
+  push:
+    branches:
+      - main
+      - test/native-gpu-lmc-ci-20261018
+    paths:
+      - engine/gfg-native/**
+      - engine/gfg-temporal/**
+      - .github/workflows/gsf-native-lmc-gpu-validation.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  async-lmc-pixels:
+    name: async GPU LMC ${{ matrix.layer_order }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer_order: native-first
+            layers: VK_LAYER_GFG_native:VK_LAYER_KHRONOS_validation
+          - layer_order: validation-first
+            layers: VK_LAYER_KHRONOS_validation:VK_LAYER_GFG_native
+    env:
+      CC: gcc-12
+      CXX: g++-12
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install software Vulkan + deterministic compile dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-12 g++-12 make libvulkan-dev libxcb1-dev xvfb mesa-vulkan-drivers vulkan-validationlayers glslang-tools spirv-tools
+          git clone -q --depth 1 --branch v1.4.365 https://github.com/KhronosGroup/Vulkan-Headers "$RUNNER_TEMP/vkh"
+      - name: Build GSF Temporal Engine GPU LMC
+        run: |
+          set -euo pipefail
+          make -C engine/gfg-temporal all lib 2>&1 | tee lmc-temporal-build.log
+          test -s engine/gfg-temporal/build/libgfg-temporal.a
+      - name: Build actual native Vulkan layer and WSI GPU smoke test
+        run: |
+          set -euo pipefail
+          make -C engine/gfg-native ENABLE_TE=1 BUILD=build-triage VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" layer build-triage/wsi-gpu-smoke 2>&1 | tee lmc-native-build.log
+          test -s engine/gfg-native/build-triage/libVkLayer_gfg_native.so
+      - name: Preserve inherited LMC correctness assertions (no allow-skips)
+        env:
+          LAYER_ORDER: ${{ matrix.layers }}
+        run: |
+          set -euo pipefail
+          env GFG_NATIVE_FG=1 GFG_NATIVE_GPU_BRIDGE=1 GFG_NATIVE_ASYNC=1 \
+              GFG_NATIVE_GPU_SYNC=same-device GFG_NATIVE_TRACE=1 \
+              GFG_NATIVE_TIMING=1 GFG_TEST_EXPECT_GPU=1 \
+              GFG_TEST_VALIDATION=1 GFG_TEST_PROTON_CHAIN=1 \
+              GFG_NATIVE_ALGO=lmc-gpu GFG_TEST_FRAMES=8 \
+              GFG_NATIVE_GPU_BRIDGE_VERIFY=1 GFG_NATIVE_GPU_BRIDGE_VERIFY_EVERY=2 \
+              VK_INSTANCE_LAYERS="$LAYER_ORDER" \
+              VK_LAYER_PATH="$GITHUB_WORKSPACE/engine/gfg-native/build-triage:/usr/share/vulkan/explicit_layer.d" \
+              xvfb-run -a engine/gfg-native/build-triage/wsi-gpu-smoke \
+              2>&1 | tee lmc-async-smoke.log
+          # The program itself asserts zero unexpected skips, positive pixel
+          # verification and that every checked synthetic image is distinct.
+          grep -q 'real=8 synthetic=14 skipped=0' lmc-async-smoke.log
+          grep -q 'GPU bridge WSI smoke PASS' lmc-async-smoke.log
+      - name: Report exact CI diagnostic counts
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          log = Path("lmc-async-smoke.log")
+          if log.exists():
+              lines = log.read_text(errors="replace").splitlines()
+              counts = [x for x in lines if "gpu stats bridges=" in x]
+              failure = [x for x in lines if "GPU smoke check failed:" in x or "Validation Error" in x or "VUID-" in x]
+              with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                  f.write("### Native GSF async GPU LMC / software Vulkan\n\n")
+                  f.write("This is a pixel/sync assertion test, not Steam Deck scanout or performance evidence.\n\n")
+                  f.write("Latest counts: `" + (counts[-1] if counts else "NOT REPORTED") + "`\n\n")
+                  if failure:
+                      f.write("Failures:\n\n" + "\n".join("- `" + x[:400] + "`" for x in failure[-12:]) + "\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gsf-native-lmc-${{ matrix.layer_order }}-${{ github.sha }}
+          path: |
+            lmc-async-smoke.log
+            lmc-temporal-build.log
+            lmc-native-build.log
+          if-no-files-found: warn
+          retention-days: 14
