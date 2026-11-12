@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']

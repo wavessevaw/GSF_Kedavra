@@ -308,7 +308,7 @@ namespace kfg
 		}
 		h.pixels = std::move( px );
 		h.uInputMode = hdr[7] <= 3 ? hdr[7] : 0;
-		h.uCorner = hdr[ 4 ] & 3u;
+		h.uCorner = hdr[ 4 ] <= 4u ? hdr[ 4 ] : 0u;
 		h.uMargin = std::min( hdr[ 5 ], 200u );
 		h.bUpload = true;
 		h.bVisible = true;
@@ -327,8 +327,8 @@ namespace kfg
 		if ( !h.bVisible || !h.pTex || pFrameInfo->layers.count() >= k_nMaxLayers ) {
 			hud_input::geometry(0,0,0,0,0); return;
 		}
-		const float flX = ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
-		const float flY = ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
+		const float flX = h.uCorner == 4u ? ( flOutW - h.uWidth ) * 0.5f : ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
+		const float flY = h.uCorner == 4u ? ( flOutH - h.uHeight ) * 0.5f : ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
 		hud_input::geometry(flX, flY, h.uWidth, h.uHeight, g_State.bSteamUI || !g_State.uPaintAppID ? 0 : h.uInputMode);
 
 		FrameInfo_t::Layer_t *layer = pFrameInfo->layers.push();
