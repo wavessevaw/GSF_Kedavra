@@ -101,6 +101,7 @@ function Content() {
       <PanelSectionRow><div style={{fontSize: 12}}>Диагностика (применяется после перезапуска игры):</div>
         <Dropdown rgOptions={[
           {data: 'normal', label: 'Обычный 2× + Timeline Watch'},
+          {data: 'normal-queue-observe', label: 'Диагностика: задания игры перед генерацией'},
           {data: 'normal-no-watch', label: 'Контроль: 2× без Timeline Watch'},
           {data: 'normal-no-latency-admission', label: 'Контроль: прежний допуск, калибровка включена'},
           {data: 'normal-no-calibration', label: 'Контроль: 2× без калибровки'},

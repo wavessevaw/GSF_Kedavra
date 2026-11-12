@@ -117,3 +117,5 @@ GSF: GPL-3.0-or-later. Исходники этой сборки — SOURCE.tar.g
 сборки и точные версии — decky/package-lock.json в исходниках. Decky UI и
 React предоставляет установленный Decky Loader. Исходники и лицензии
 использованного API/loader shim приложены в third_party.
+
+The opt-in `normal-queue-observe` diagnostic records application submit completion evidence at TE enqueue. It preserves normal admission and calibration. Counts are upper bounds, not hardware queue depth; see `docs/GSF_QUEUE_OBSERVATION_DIAGNOSTIC.md`. The normal profile leaves it disabled. Launcher-prefixed GFG_NATIVE variables are intentionally filtered; select the diagnostic profile instead.

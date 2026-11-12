@@ -31,7 +31,27 @@ static PFN_vkVoidFunction fake_gdpa(VkDevice d,const char *n){
     (void)d;
     return strstr(n,"CalibratedTimestamps")?(PFN_vkVoidFunction)fake_get:NULL;
 }
-int main(void) {
+static void replay_overlap(const char *path) {
+    FILE *f=fopen(path,"r");assert(f);char line[1024];unsigned checked=0;
+    while(fgets(line,sizeof(line),f)) {
+        if(line[0]=='#' || line[0]=='t')continue;
+        uint64_t seq,cpu,gpu,dev,start,returned;int64_t expected;
+        assert(sscanf(line,"%" SCNu64 ",%" SCNu64 ",%" SCNu64 ",%" SCNu64
+            ",%" SCNu64 ",%" SCNu64 ",%" SCNd64,
+            &seq,&cpu,&gpu,&dev,&start,&returned,&expected)==7);
+        (void)seq;
+        gsf_calibrated_clock c={.enabled=1,.size=1,
+            .samples={{.cpu_ns=cpu,.gpu_ticks=gpu,.deviation_ns=dev}}};
+        gsf_clock_estimate out=gsf_calibration_estimate(&c,start,1.0,returned);
+        assert(out.valid && !strcmp(out.reason,"calibrated"));
+        assert(expected<0 && strtoll(out.delta_text,NULL,10)==expected);
+        assert(out.start_ns<returned && out.delay_ns==0 && !strcmp(out.delay_text,"0"));
+        ++checked;
+    }
+    fclose(f);assert(checked==15);
+    printf("GSF real submit-overlap replay: %u previously rejected samples now calibrated, zero remaining start delay PASS\n",checked);
+}
+int main(int argc,char **argv) {
     FILE *log=tmpfile();assert(log);
     gsf_calibrated_clock c={0};
     gsf_calibration_init(&c,(VkInstance)1,(VkPhysicalDevice)1,(VkDevice)1,
@@ -60,6 +80,20 @@ int main(void) {
     assert(!missing.enabled);
     out=gsf_calibration_estimate(&missing,1020,1000.0,19999999000ull);
     assert(!out.valid && !strcmp(out.reason,"not_calibrated"));
+    /* GPU may legally begin before queue-submit returns on the CPU. Keep
+     * the signed delta, budget no negative time, retain plausibility bounds. */
+    gsf_calibrated_clock overlap={.enabled=1,.size=1,
+        .samples={{.cpu_ns=20000000000ull,.gpu_ticks=1000,.deviation_ns=1}}};
+    out=gsf_calibration_estimate(&overlap,1000,1.0,20000001000ull);
+    assert(out.valid && out.start_ns==20000000000ull && out.delay_ns==0);
+    assert(!strcmp(out.delta_text,"-1000") && !strcmp(out.delay_text,"0"));
+    out=gsf_calibration_estimate(&overlap,1000,1.0,20000000000ull);
+    assert(out.valid && out.delay_ns==0 && !strcmp(out.delta_text,"0"));
+    out=gsf_calibration_estimate(&overlap,1000,1.0,22000000001ull);
+    assert(!out.valid && !strcmp(out.reason,"inconsistent_timestamps"));
+    out=gsf_calibration_estimate(&overlap,1000,1.0,17999999999ull);
+    assert(!out.valid && !strcmp(out.reason,"inconsistent_timestamps"));
+    if(argc==2)replay_overlap(argv[1]);
     fclose(log);
     puts("GSF calibration: paired clocks, maxDeviation, stale, missing domain PASS");
     return 0;

@@ -39,7 +39,8 @@ typedef struct {
 
 typedef struct {
     char start_text[32], delay_text[32], calibration_text[32], deviation_text[32];
-    uint64_t start_ns, delay_ns; /* meaningful only when valid */
+    char delta_text[32]; /* signed GPU start minus host submit return */
+    uint64_t start_ns, delay_ns; /* valid only: delay clamps already-started work to zero */
     const char *reason;
     int valid;
 } gsf_clock_estimate;
@@ -123,7 +124,7 @@ static gsf_clock_estimate gsf_calibration_estimate(
     const gsf_calibrated_clock *s,uint64_t gpu_start_ticks,
     double timestamp_period_ns,uint64_t submit_return_ns) {
     gsf_clock_estimate out={.start_text="null",.delay_text="null",
-        .calibration_text="null",.deviation_text="null",.reason="not_calibrated"};
+        .calibration_text="null",.deviation_text="null",.delta_text="null",.reason="not_calibrated"};
     if(!s->enabled || !s->size)return out;
     if(!timestamp_period_ns || timestamp_period_ns<0.001 || timestamp_period_ns>1000000.0 ||
        !submit_return_ns)return out;
@@ -152,15 +153,17 @@ static gsf_clock_estimate gsf_calibration_estimate(
     long double cpu=(long double)best->cpu_ns+offset;
     if(cpu<0 || cpu>18446744073709551615.0L){out.reason="time_overflow";return out;}
     uint64_t start=(uint64_t)cpu;
-    /* Never output a negative queue delay. Timestamp calibration is
-     * uncertain when start precedes the host submit return. */
-    if(start<submit_return_ns || start-submit_return_ns>2000000000ull){
-        out.reason="inconsistent_timestamps";return out;
-    }
+    /* Device execution may start while vkQueueSubmit is still returning.
+     * Preserve that signed observation. Admission only budgets the remaining
+     * delay after host return, so already-started work contributes zero.
+     * Keep the existing 2s plausibility bound; never wrap unsigned subtraction. */
+    const uint64_t distance=start>=submit_return_ns?start-submit_return_ns:submit_return_ns-start;
+    if(distance>2000000000ull){out.reason="inconsistent_timestamps";return out;}
+    const int64_t delta=start>=submit_return_ns?(int64_t)distance:-(int64_t)distance;
+    snprintf(out.delta_text,sizeof(out.delta_text),"%" PRId64,delta);
     snprintf(out.start_text,sizeof(out.start_text),"%llu",(unsigned long long)start);
-    snprintf(out.delay_text,sizeof(out.delay_text),"%llu",
-        (unsigned long long)(start-submit_return_ns));
-    out.start_ns=start;out.delay_ns=start-submit_return_ns;
+    out.start_ns=start;out.delay_ns=start>=submit_return_ns?distance:0;
+    snprintf(out.delay_text,sizeof(out.delay_text),"%llu",(unsigned long long)out.delay_ns);
     out.reason="calibrated";out.valid=1;return out;
 }
 #endif

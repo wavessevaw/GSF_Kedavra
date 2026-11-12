@@ -48,6 +48,7 @@
 #include "frame_clock.h"
 #include "present_chain.h"
 #include "past_timing.h"
+#include "refresh_observation.h"
 #include "te_engine.h"
 #include "timeline_watch.h"
 #include "calibrated_clock.h"
@@ -148,6 +149,7 @@ struct gfg_gpu_fg {
     uint64_t last_te_value;      /* last value TE will signal */
     timeline_watch *timeline_observer;
     gsf_calibrated_clock calibrated;
+    gsf_queue_probe_fn queue_probe;
     int lmc_tier;
 
     /* test-only verification (GFG_NATIVE_GPU_BRIDGE_VERIFY=1) */
@@ -211,6 +213,7 @@ struct gfg_gpu_fg {
     FILE *telemetry;
     uint64_t telemetry_flush_ns;
     int display_timing;
+    gsf_refresh_observation refresh_observation;
     uint32_t google_id;
     PFN_vkGetRefreshCycleDurationGOOGLE refresh_cycle;
     PFN_vkGetPastPresentationTimingGOOGLE past_timing;
@@ -419,7 +422,7 @@ static void gpu_sample(gfg_gpu_fg *fg) {
             gpu_tick_period_ns,submit_return_ns);
     else {
         estimate=(gsf_clock_estimate){.start_text="null",.delay_text="null",
-            .calibration_text="null",.deviation_text="null",
+            .calibration_text="null",.deviation_text="null",.delta_text="null",
             .reason=s.timed?"timestamp_bits_below_64":"gpu_timestamps_unavailable"};
     }
     if(fg->latency_admission)
@@ -428,13 +431,13 @@ static void gpu_sample(gfg_gpu_fg *fg) {
         fprintf(fg->telemetry,"{\"schema\":1,\"event\":\"gpu_correlated\","
             "\"pid\":%ld,\"generation\":%llu,\"te_sequence\":%llu,\"submit_return_ns\":%llu,\"gpu_start_ticks\":%llu,"
             "\"timestamp_valid_bits\":%u,\"gpu_timestamp_period_ns\":%.9f,"
-            "\"gpu_start_cpu_ns\":%s,\"submit_to_gpu_start_ns\":%s,"
+            "\"gpu_start_cpu_ns\":%s,\"submit_to_gpu_start_ns\":%s,\"gpu_start_minus_submit_return_ns\":%s,"
             "\"calibration_ns\":%s,\"calibration_max_deviation_ns\":%s,"
             "\"calibration_status\":\"%s\"}\n",
             (long)getpid(),(unsigned long long)fg->generation,
             (unsigned long long)s.sequence,(unsigned long long)submit_return_ns,
             (unsigned long long)gpu_start_ticks,timestamp_valid_bits,
-            gpu_tick_period_ns,estimate.start_text,estimate.delay_text,
+            gpu_tick_period_ns,estimate.start_text,estimate.delay_text,estimate.delta_text,
             estimate.calibration_text,estimate.deviation_text,estimate.reason);
     }
     if(fg->telemetry) {
@@ -946,6 +949,7 @@ gfg_gpu_fg *gfg_gpu_fg_create(const gfg_gpu_fg_create_info *info) {
     fg->pace_real=0;
     if(fg->context){te_poll(fg->context);gpu_sample(fg);}
     fg->device = info->device;
+    fg->queue_probe = info->queue_probe;
     fg->queue = info->queue;
     fg->swapchain = info->swapchain;
     fg->family = info->family;
@@ -1072,9 +1076,9 @@ gfg_gpu_fg *gfg_gpu_fg_create(const gfg_gpu_fg_create_info *info) {
         fg->refresh_cycle=(PFN_vkGetRefreshCycleDurationGOOGLE)info->gdpa(info->device,"vkGetRefreshCycleDurationGOOGLE");
         fg->past_timing=(PFN_vkGetPastPresentationTimingGOOGLE)info->gdpa(info->device,"vkGetPastPresentationTimingGOOGLE");
     }
-    fprintf(stderr,"[gfg-native] display_timing enabled=%d namespace=%s refresh_source=%s physical_scanout=unverified\n",
+    fprintf(stderr,"[gfg-native] display_timing enabled=%d namespace=%s refresh_query_available=%d physical_scanout=unverified\n",
         fg->display_timing,fg->display_timing==2?"layer":fg->display_timing==1?"application":"unavailable",
-        fg->refresh_cycle?"WSI-query":"configured-fallback");
+        fg->refresh_cycle!=NULL);
     const char *algorithm = getenv("GFG_NATIVE_ALGO");
     cd.params.algorithm=algorithm && !strcmp(algorithm,"lmc-gpu")?TE_ALGO_LMC_GPU:
         algorithm && !strcmp(algorithm,"lmc")?TE_ALGO_LMC:
@@ -1117,12 +1121,24 @@ gfg_gpu_fg *gfg_gpu_fg_create(const gfg_gpu_fg_create_info *info) {
     if(cd.params.algorithm==TE_ALGO_LMC_GPU && env_flag("GFG_NATIVE_PACING"))
         fg->clock.period_ns=1000000000ull/90;
     const char *rate=getenv("GFG_NATIVE_OUTPUT_HZ");
+    int refresh_override_applied=0;
     /* Explicit pacing also applies to GPU LMC; its default stays unpaced.
      * Correctness probes and visible cadence demos are separate contracts. */
     if(rate && (cd.params.algorithm==TE_ALGO_SHARED_FLOW || cd.params.algorithm==TE_ALGO_LMC_GPU)) {
         char *end=NULL;long hz=strtol(rate,&end,10);
-        if(end!=rate && !*end && hz>=1 && hz<=240)fg->clock.period_ns=1000000000ull/(uint64_t)hz;
+        if(end!=rate && !*end && hz>=1 && hz<=240) {
+            fg->clock.period_ns=1000000000ull/(uint64_t)hz;refresh_override_applied=1;
+        }
     }
+    gsf_refresh_init(&fg->refresh_observation,fg->clock.period_ns,refresh_override_applied);
+    if(fg->telemetry)fprintf(fg->telemetry,
+        "{\"schema\":1,\"event\":\"bridge_context\",\"pid\":%ld,\"generation\":%llu,"
+        "\"frontend_hint\":\"%s\",\"engine_version\":%u,\"instance_api_version\":%u,"
+        "\"present_queue_family\":%u,\"te_uses_present_queue\":%s,"
+        "\"source_timestamp_semantics\":\"cpu_vulkan_present_entry\",\"source_clock\":\"CLOCK_MONOTONIC\","
+        "\"source_gpu_ready_ns\":null,\"physical_display_hz\":null}\n",
+        (long)getpid(),(unsigned long long)fg->generation,info->frontend_hint?info->frontend_hint:"unspecified",
+        info->engine_version,info->instance_api_version,info->family,fg->same_device?"true":"false");
     const char *diagnostic=getenv("GFG_NATIVE_DIAGNOSTIC_MODE");
     fg->diagnostic=diagnostic && !strcmp(diagnostic,"source-only")?1:
         diagnostic && !strcmp(diagnostic,"compute-only")?2:
@@ -1720,16 +1736,21 @@ VkResult gfg_gpu_fg_present(gfg_gpu_fg *fg, VkQueue queue, const VkPresentInfoKH
     fg->source_serial=fg->frame+1;
     const uint64_t source0=fg->previous_source_ns,serial0=fg->previous_serial;
     fg->previous_source_ns=fg->source_ns;fg->previous_serial=fg->source_serial;
+    gsf_refresh_begin(&fg->refresh_observation,fg->pacing_active,fg->clock.period_ns,
+        getenv("GFG_NATIVE_OUTPUT_HZ")!=NULL,fg->refresh_cycle!=NULL);
     if(fg->pacing_active && fg->clock.period_ns) {
-        /* Gamescope's WSI returns the compositor refresh cycle. A callable
-         * GDPA pointer alone is insufficient: the extension was enabled by
+        /* Record the WSI response, not a claim about physical panel refresh.
+         * A callable GDPA pointer alone is insufficient: the extension was enabled by
          * CreateDevice. Explicit OUTPUT_HZ remains a lab/user override. */
         if(fg->refresh_cycle && !getenv("GFG_NATIVE_OUTPUT_HZ")) {
             VkRefreshCycleDurationGOOGLE cycle={0};
+            const uint64_t query_start=(uint64_t)(now_us()*1000.0);
             if(fg->output_wsi)pthread_mutex_lock(fg->output_wsi);
             VkResult q=fg->refresh_cycle(fg->device,fg->swapchain,&cycle);
             if(fg->output_wsi)pthread_mutex_unlock(fg->output_wsi);
-            if(q==VK_SUCCESS && cycle.refreshDuration>=1000000000ull/240 && cycle.refreshDuration<=1000000000ull)
+            const uint64_t query_end=(uint64_t)(now_us()*1000.0);
+            if(gsf_refresh_record(&fg->refresh_observation,q,cycle.refreshDuration,
+                                  query_end-query_start,query_end))
                 fg->clock.period_ns=cycle.refreshDuration;
         }
         gfg_frame_clock_pair(&fg->clock,fg->source_ns,fg->multiplier);
@@ -1737,6 +1758,9 @@ VkResult gfg_gpu_fg_present(gfg_gpu_fg *fg, VkQueue queue, const VkPresentInfoKH
     }
     fg->output_deadline_us = t0 + (double)gfg_gpu_fg_source_period_ns(fg)/1000.0;
     unsigned dispatched_outputs=0,dispatched_mask=0;
+    gsf_queue_snapshot queue_snapshot={0};
+    unsigned generation_candidate_mask=0;
+    const char *admission_decision="not_evaluated";
     uint64_t te_submit_sequence=0; /* this pair only; zero on bypass/failure */
     uint64_t compute_admission_ns=0;
     unsigned deferred_g2=0;uint64_t g2_submit_return_ns=0;
@@ -1774,6 +1798,7 @@ VkResult gfg_gpu_fg_present(gfg_gpu_fg *fg, VkQueue queue, const VkPresentInfoKH
         /* Keep the queued real frame and its consumed private gate. Only
          * optional generation/history work is dropped; never overwrite WSI. */
         fg->te_gap=1;
+        admission_decision=fg->diagnostic==1?"diagnostic_source_only":budget_skip?"budget_blocked":"source_pressure";
         const unsigned reason=budget_skip && !atomic_load(&fg->output_pressure)?DROP_RATE:DROP_BYPASS;
         if(frame)skip_outputs(fg,reason,fg->multiplier-1);
         for(unsigned k=0;k<fg->multiplier-1;++k) {
@@ -1870,6 +1895,10 @@ VkResult gfg_gpu_fg_present(gfg_gpu_fg *fg, VkQueue queue, const VkPresentInfoKH
     const unsigned timely_mask=fg->clock.period_ns?gfg_frame_clock_compute_mask(&fg->clock,compute_admission_ns,
         fg->display_timing==2?fg->clock.period_ns/4:0):compute_mask;
     const int generate=have_pair && compute_mask;
+    generation_candidate_mask=compute_mask;
+    admission_decision=generate?"admitted":!have_pair?"history_refresh":
+        atomic_load(&fg->output_pressure)?"source_pressure":!fg->clock.mask?"not_planned":
+        !timely_mask?"deadline_blocked":"budget_blocked";
     /* Observations do not prove individual submission when a later signal
      * jumps over a skipped timeline value. */
     if(generate && s.count) {
@@ -1887,7 +1916,9 @@ VkResult gfg_gpu_fg_present(gfg_gpu_fg *fg, VkQueue queue, const VkPresentInfoKH
         }
     }
     tp = now_us();
+    if(generate && fg->queue_probe)fg->queue_probe(fg->queue,&queue_snapshot);
     VkResult tr = inject_te_busy ? VK_NOT_READY : te_submit_frame(fg->context, &s);
+    if(generate && fg->queue_probe)fg->queue_probe(fg->queue,NULL);
     fg->phase_us[1] += now_us() - tp;
     if(tr==VK_SUCCESS && generate && s.count)
         gsf_calibration_maybe_sample(&fg->calibrated,fg->frame);
@@ -2020,11 +2051,30 @@ timing:
         fprintf(stderr,"[gfg-native] visibility_probe frame=%llu synthetic_wsi=%d real_wsi=%d detail=%s bounded_wait_ms=12\n",
             (unsigned long long)frame,fg->slot_drop[0]==-1,fg->accepted_ns[2]!=0,fg->slot_detail[0]);
     if(fg->telemetry) {
+        if(queue_snapshot.captures)fprintf(fg->telemetry,
+            "{\"schema\":1,\"event\":\"queue_observation\",\"pid\":%ld,\"generation\":%llu,"
+            "\"te_sequence\":%llu,\"source1_id\":%llu,\"sample_ns\":%llu,\"query_cpu_ns\":%llu,"
+            "\"available\":%u,\"te_submit_calls\":%u,\"app_submits_total\":%llu,\"confirmed_complete_through\":%llu,"
+            "\"app_submits_unretired_upper_bound\":%llu,\"tracked_fences_not_ready\":%u,"
+            "\"unfenced_unretired\":%llu,\"tracking_lost\":%u,\"query_errors\":%u,"
+            "\"other_queue_unretired_upper_bound\":%llu,\"hardware_queue_depth\":null,\"pure_queue_wait_ns\":null}\n",
+            (long)getpid(),(unsigned long long)fg->generation,(unsigned long long)te_submit_sequence,
+            (unsigned long long)fg->source_serial,(unsigned long long)queue_snapshot.captured_ns,
+            (unsigned long long)queue_snapshot.query_cpu_ns,queue_snapshot.available,queue_snapshot.captures,
+            (unsigned long long)queue_snapshot.submitted,(unsigned long long)queue_snapshot.confirmed_complete_through,
+            (unsigned long long)queue_snapshot.unretired_upper_bound,queue_snapshot.tracked_not_ready,
+            (unsigned long long)queue_snapshot.unfenced_unretired,queue_snapshot.tracking_lost,queue_snapshot.query_errors,
+            (unsigned long long)queue_snapshot.other_queue_unretired);
+        char refresh_result[32]="null";
+        if(fg->refresh_observation.attempted)snprintf(refresh_result,sizeof(refresh_result),"%d",
+            (int)fg->refresh_observation.result);
         fprintf(fg->telemetry,"{\"schema\":1,\"event\":\"pair\",\"pid\":%ld,\"generation\":%llu,\"pair\":%llu,"
             "\"source0_id\":%llu,\"source1_id\":%llu,\"source0_ns\":%llu,\"source1_ns\":%llu,"
             "\"admitted_ns\":%llu,\"worker_start_ns\":%llu,\"worker_end_ns\":%llu,\"interval_ns\":%llu,"
-            "\"refresh_period_ns\":%llu,\"multiplier\":%u,\"planned_mask\":%u,\"dispatched_outputs\":%u,\"compute_mask\":%u,\"transport_submit_mask\":%u,\"source_discontinuity\":%u,"
-            "\"compute_admission_ns\":%llu,\"gpu_budget_ns\":[%llu,%llu],\"submit_delay_budget_ns\":%llu,\"submit_delay_budget_calibrated\":%d,\"deferred_g2\":%u,\"g2_submit_return_ns\":%llu,\"te_submit_sequence\":%llu,"
+            "\"refresh_period_ns\":%llu,\"refresh_origin\":\"%s\",\"refresh_query_state\":\"%s\","
+            "\"refresh_query_result\":%s,\"refresh_query_raw_ns\":%llu,\"refresh_query_cpu_ns\":%llu,"
+            "\"refresh_last_success_ns\":%llu,\"refresh_override_present\":%u,\"multiplier\":%u,\"planned_mask\":%u,\"dispatched_outputs\":%u,\"compute_mask\":%u,\"transport_submit_mask\":%u,\"source_discontinuity\":%u,"
+            "\"admission_decision\":\"%s\",\"generation_candidate_mask\":%u,\"compute_admission_ns\":%llu,\"gpu_budget_ns\":[%llu,%llu],\"submit_delay_budget_ns\":%llu,\"submit_delay_budget_calibrated\":%d,\"deferred_g2\":%u,\"g2_submit_return_ns\":%llu,\"te_submit_sequence\":%llu,"
             "\"target_ns\":[%llu,%llu,%llu],\"readiness_observed_ns\":[%llu,%llu],"
             "\"wsi_accepted_ns\":[%llu,%llu,%llu],\"wsi_call_ns\":[%llu,%llu,%llu],"
             "\"readiness_wait_ns\":[%llu,%llu],\"google_present_ids\":[%u,%u,%u],\"drop_detail\":[\"%s\",\"%s\"],\"cpu_phase_us\":[%.3f,%.3f,%.3f,%.3f,%.3f],\"te_sequence\":%llu,\"drop_code\":[%d,%d],\"cut\":%d,\"duplicate\":%d,\"physical_displayed\":null,\"visually_unique\":null}\n",
@@ -2032,8 +2082,11 @@ timing:
             (unsigned long long)serial0,(unsigned long long)fg->source_serial,
             (unsigned long long)source0,(unsigned long long)fg->source_ns,
             (unsigned long long)fg->admitted_ns,(unsigned long long)(t0*1000.0),(unsigned long long)(now_us()*1000.0),
-            (unsigned long long)fg->clock.interval_ns,(unsigned long long)fg->clock.period_ns,fg->multiplier,fg->clock.mask,dispatched_outputs,dispatched_mask,fg->transport_submit_mask,fg->clock.discontinuity,
-            (unsigned long long)compute_admission_ns,(unsigned long long)fg->gpu_budget_ns[0],
+            (unsigned long long)fg->clock.interval_ns,(unsigned long long)fg->clock.period_ns,
+            fg->refresh_observation.origin,fg->refresh_observation.query_state,refresh_result,
+            (unsigned long long)fg->refresh_observation.raw_ns,(unsigned long long)fg->refresh_observation.query_cpu_ns,
+            (unsigned long long)fg->refresh_observation.last_success_ns,fg->refresh_observation.override_present,fg->multiplier,fg->clock.mask,dispatched_outputs,dispatched_mask,fg->transport_submit_mask,fg->clock.discontinuity,
+            admission_decision,generation_candidate_mask,(unsigned long long)compute_admission_ns,(unsigned long long)fg->gpu_budget_ns[0],
             (unsigned long long)fg->gpu_budget_ns[1],(unsigned long long)fg->generation_budget.submit_delay_ns,
             fg->generation_budget.calibrated,deferred_g2,(unsigned long long)g2_submit_return_ns,
             (unsigned long long)te_submit_sequence,

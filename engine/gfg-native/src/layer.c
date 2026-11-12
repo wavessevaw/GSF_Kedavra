@@ -17,6 +17,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include "swapchain_chain.h"
+#include "queue_observation.h"
 #ifdef GFG_NATIVE_TEST_OUTPUT_OWNER_HOOKS
 #include "virtual_wsi_facade.h"
 #include "output_proxy_bootstrap.h"
@@ -42,6 +43,8 @@ typedef struct native_instance {
     PFN_vkDestroyInstance destroy;
     PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR surface_caps;
     uint32_t api_version;
+    uint32_t engine_version;
+    const char *frontend_hint;
     int enabled;
 } native_instance;
 
@@ -115,6 +118,13 @@ typedef struct native_device {
 #endif
     PFN_vkAcquireNextImageKHR acquire;
     PFN_vkAcquireNextImage2KHR acquire2;
+    gsf_queue_observer *queue_observer; /* opt-in, API-call completion evidence */
+    PFN_vkGetFenceStatus fence_status;
+    PFN_vkWaitForFences wait_fences;
+    PFN_vkResetFences reset_fences;
+    PFN_vkDestroyFence destroy_fence;
+    PFN_vkImportFenceFdKHR import_fence_fd;
+    PFN_vkGetFenceFdKHR get_fence_fd;
     PFN_vkQueueSubmit submit;
     PFN_vkQueueSubmit2 submit2, submit2_khr;
     PFN_vkQueueBindSparse bind_sparse;
@@ -208,6 +218,9 @@ native_CreateInstance(const VkInstanceCreateInfo *ci,
     }
     const char *engine = ci->pApplicationInfo
         ? ci->pApplicationInfo->pEngineName : NULL;
+    i->frontend_hint=engine && !strcmp(engine,"DXVK")?"dxvk":
+        engine && !strcmp(engine,"vkd3d")?"vkd3d":"other_or_unspecified";
+    i->engine_version=ci->pApplicationInfo?ci->pApplicationInfo->engineVersion:0;
     const char *flag = getenv("GFG_NATIVE_FG");
     i->enabled = flag && strcmp(flag, "1") == 0 &&
         !(engine && (strcmp(engine, "gfg-temporal") == 0 ||
@@ -615,6 +628,14 @@ native_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
     d->wait_present2 = (PFN_vkWaitForPresent2KHR)gdpa(*out, "vkWaitForPresent2KHR");
     d->acquire2 = (PFN_vkAcquireNextImage2KHR)
         gdpa(*out, "vkAcquireNextImage2KHR");
+    d->import_fence_fd = (PFN_vkImportFenceFdKHR)gdpa(*out,"vkImportFenceFdKHR");
+    d->get_fence_fd = (PFN_vkGetFenceFdKHR)gdpa(*out,"vkGetFenceFdKHR");
+    d->fence_status = (PFN_vkGetFenceStatus)gdpa(*out, "vkGetFenceStatus");
+    d->wait_fences = (PFN_vkWaitForFences)gdpa(*out, "vkWaitForFences");
+    d->reset_fences = (PFN_vkResetFences)gdpa(*out, "vkResetFences");
+    d->destroy_fence = (PFN_vkDestroyFence)gdpa(*out, "vkDestroyFence");
+    if(d->async_output && native_env_is_1("GFG_NATIVE_QUEUE_OBSERVE"))
+        d->queue_observer=calloc(1,sizeof(*d->queue_observer));
     d->submit = (PFN_vkQueueSubmit)gdpa(*out, "vkQueueSubmit");
     d->submit2 = (PFN_vkQueueSubmit2)gdpa(*out, "vkQueueSubmit2");
     d->submit2_khr = (PFN_vkQueueSubmit2)gdpa(*out, "vkQueueSubmit2KHR");
@@ -856,29 +877,111 @@ static VkResult native_ids_translate(native_present_ids *ids, uint64_t app_id, u
 #define NATIVE_TIMING_CAP 8192
 /* All queue host operations, including app submits resolved through GIPA,
  * share one device lock. It is never held across a worker fence/image wait. */
-static VKAPI_ATTR VkResult VKAPI_CALL native_QueueSubmit(VkQueue q, uint32_t n, const VkSubmitInfo *s, VkFence f) {
-    native_device *d = find_device(dispatch_key(q));
-    if (!d || !d->submit) return VK_ERROR_INITIALIZATION_FAILED;
-    pthread_mutex_lock(&d->queue_lock); VkResult r = d->submit(q,n,s,f);
-    pthread_mutex_unlock(&d->queue_lock); return r;
+/* Fence lifetimes share queue_lock ONLY in this opt-in observer. Never hold
+ * this lock across an added GPU wait, nor add fences to application work. */
+static _Thread_local gsf_queue_snapshot *native_queue_probe_scope;
+#if defined(GFG_NATIVE_WITH_TE) || defined(GFG_NATIVE_TEST_QUEUE_OBSERVE)
+static void native_queue_probe(VkQueue queue,gsf_queue_snapshot *snapshot) {
+    (void)queue;native_queue_probe_scope=snapshot;
 }
-static VKAPI_ATTR VkResult VKAPI_CALL native_QueueSubmit2(VkQueue q, uint32_t n, const VkSubmitInfo2 *s, VkFence f) {
-    native_device *d = find_device(dispatch_key(q));
-    if (!d || !d->submit2) return VK_ERROR_INITIALIZATION_FAILED;
-    pthread_mutex_lock(&d->queue_lock); VkResult r = d->submit2(q,n,s,f);
-    pthread_mutex_unlock(&d->queue_lock); return r;
+#endif
+static uint64_t native_qo_now(void) {
+    struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
+    return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;
 }
-static VKAPI_ATTR VkResult VKAPI_CALL native_QueueSubmit2KHR(VkQueue q, uint32_t n, const VkSubmitInfo2 *s, VkFence f) {
-    native_device *d = find_device(dispatch_key(q));
-    if (!d || !d->submit2_khr) return VK_ERROR_INITIALIZATION_FAILED;
-    pthread_mutex_lock(&d->queue_lock); VkResult r = d->submit2_khr(q,n,s,f);
-    pthread_mutex_unlock(&d->queue_lock); return r;
+static void native_queue_sample(native_device *d,VkQueue queue) {
+    gsf_queue_snapshot *s=native_queue_probe_scope;
+    if(!d->queue_observer || !s)return;
+    if(s->captures++)return; /* first TE queue submit, count subsequent ones */
+    const uint64_t begin=native_qo_now();
+    gsf_qo_snapshot(d->queue_observer,queue,d->handle,d->fence_status,s);
+    s->captured_ns=native_qo_now();s->query_cpu_ns=s->captured_ns-begin;
 }
-static VKAPI_ATTR VkResult VKAPI_CALL native_QueueBindSparse(VkQueue q, uint32_t n, const VkBindSparseInfo *s, VkFence f) {
-    native_device *d = find_device(dispatch_key(q));
-    if (!d || !d->bind_sparse) return VK_ERROR_INITIALIZATION_FAILED;
-    pthread_mutex_lock(&d->queue_lock); VkResult r = d->bind_sparse(q,n,s,f);
-    pthread_mutex_unlock(&d->queue_lock); return r;
+#define NATIVE_SUBMIT_WRAPPER(name,field,type,application) \
+static VKAPI_ATTR VkResult VKAPI_CALL name(VkQueue q,uint32_t n,const type *s,VkFence f) { \
+    native_device *d=find_device(dispatch_key(q)); \
+    if(!d || !d->field)return VK_ERROR_INITIALIZATION_FAILED; \
+    pthread_mutex_lock(&d->queue_lock); \
+    if(!(application))native_queue_sample(d,q); \
+    VkResult r=d->field(q,n,s,f); \
+    if((application) && d->queue_observer)gsf_qo_submit(d->queue_observer,q,f,r); \
+    pthread_mutex_unlock(&d->queue_lock);return r; }
+NATIVE_SUBMIT_WRAPPER(native_QueueSubmit,submit,VkSubmitInfo,1)
+NATIVE_SUBMIT_WRAPPER(native_QueueSubmit2,submit2,VkSubmitInfo2,1)
+NATIVE_SUBMIT_WRAPPER(native_QueueSubmit2KHR,submit2_khr,VkSubmitInfo2,1)
+NATIVE_SUBMIT_WRAPPER(native_QueueBindSparse,bind_sparse,VkBindSparseInfo,1)
+#if defined(GFG_NATIVE_WITH_TE) || defined(GFG_NATIVE_TEST_QUEUE_OBSERVE)
+NATIVE_SUBMIT_WRAPPER(native_worker_QueueSubmit,submit,VkSubmitInfo,0)
+NATIVE_SUBMIT_WRAPPER(native_worker_QueueSubmit2,submit2,VkSubmitInfo2,0)
+NATIVE_SUBMIT_WRAPPER(native_worker_QueueSubmit2KHR,submit2_khr,VkSubmitInfo2,0)
+#endif
+#undef NATIVE_SUBMIT_WRAPPER
+static VKAPI_ATTR VkResult VKAPI_CALL native_GetFenceStatus(VkDevice device,VkFence f) {
+    native_device *d=find_device(dispatch_key(device));
+    if(!d || !d->fence_status)return VK_ERROR_INITIALIZATION_FAILED;
+    if(!d->queue_observer)return d->fence_status(device,f);
+    pthread_mutex_lock(&d->queue_lock);VkResult r=d->fence_status(device,f);
+    if(r==VK_SUCCESS)gsf_qo_signaled(d->queue_observer,f);
+    pthread_mutex_unlock(&d->queue_lock);return r;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL native_WaitForFences(VkDevice device,uint32_t n,const VkFence *f,
+                                                          VkBool32 all,uint64_t timeout) {
+    native_device *d=find_device(dispatch_key(device));
+    if(!d || !d->wait_fences)return VK_ERROR_INITIALIZATION_FAILED;
+    if(!d->queue_observer)return d->wait_fences(device,n,f,all,timeout);
+    gsf_qo_fence before[GSF_QO_FENCES];
+    pthread_mutex_lock(&d->queue_lock);
+    memcpy(before,d->queue_observer->fences,sizeof(before));
+    pthread_mutex_unlock(&d->queue_lock);
+    /* This is ONLY the app's original wait, unchanged. Never hold queue_lock
+     * across it: another thread may need to submit the work being waited on. */
+    VkResult r=d->wait_fences(device,n,f,all,timeout);
+    if(r==VK_SUCCESS && (all || n==1)) {
+        pthread_mutex_lock(&d->queue_lock);
+        for(unsigned i=0;i<GSF_QO_FENCES;++i)if(before[i].handle) {
+            gsf_qo_fence *now=&d->queue_observer->fences[i];
+            if(now->handle!=before[i].handle || now->queue!=before[i].queue ||
+                now->sequence!=before[i].sequence)continue; /* lifetime changed */
+            for(uint32_t j=0;j<n;++j)if(f[j]==before[i].handle) {
+                gsf_qo_signaled(d->queue_observer,f[j]);break;
+            }
+        }
+        pthread_mutex_unlock(&d->queue_lock);
+    }
+    return r;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL native_ResetFences(VkDevice device,uint32_t n,const VkFence *f) {
+    native_device *d=find_device(dispatch_key(device));
+    if(!d || !d->reset_fences)return VK_ERROR_INITIALIZATION_FAILED;
+    if(!d->queue_observer)return d->reset_fences(device,n,f);
+    pthread_mutex_lock(&d->queue_lock);
+    VkResult r=d->reset_fences(device,n,f);
+    if(r==VK_SUCCESS)for(uint32_t i=0;i<n;++i)gsf_qo_forget(d->queue_observer,f[i]);
+    pthread_mutex_unlock(&d->queue_lock);return r;
+}
+static VKAPI_ATTR void VKAPI_CALL native_DestroyFence(VkDevice device,VkFence f,const VkAllocationCallbacks *a) {
+    native_device *d=find_device(dispatch_key(device));if(!d || !d->destroy_fence)return;
+    if(!d->queue_observer){d->destroy_fence(device,f,a);return;}
+    pthread_mutex_lock(&d->queue_lock);gsf_qo_forget(d->queue_observer,f);
+    d->destroy_fence(device,f,a);pthread_mutex_unlock(&d->queue_lock);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL native_ImportFenceFdKHR(VkDevice device,const VkImportFenceFdInfoKHR *info) {
+    native_device *d=find_device(dispatch_key(device));
+    if(!d || !d->import_fence_fd)return VK_ERROR_EXTENSION_NOT_PRESENT;
+    if(!d->queue_observer)return d->import_fence_fd(device,info);
+    pthread_mutex_lock(&d->queue_lock);
+    VkResult r=d->import_fence_fd(device,info);
+    if(r==VK_SUCCESS)gsf_qo_forget(d->queue_observer,info->fence);
+    pthread_mutex_unlock(&d->queue_lock);return r;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL native_GetFenceFdKHR(VkDevice device,const VkFenceGetFdInfoKHR *info,int *fd) {
+    native_device *d=find_device(dispatch_key(device));
+    if(!d || !d->get_fence_fd)return VK_ERROR_EXTENSION_NOT_PRESENT;
+    if(!d->queue_observer)return d->get_fence_fd(device,info,fd);
+    pthread_mutex_lock(&d->queue_lock);
+    VkResult r=d->get_fence_fd(device,info,fd);
+    if(r==VK_SUCCESS)gsf_qo_forget(d->queue_observer,info->fence);
+    pthread_mutex_unlock(&d->queue_lock);return r;
 }
 static VkResult native_locked_present(VkQueue queue, const VkPresentInfoKHR *info) {
     native_device *d = find_device(dispatch_key(queue));
@@ -903,20 +1006,21 @@ static VkResult native_serialized_present(VkQueue queue, const VkPresentInfoKHR 
 /* The bridge's own WSI must reach the next layer directly. Re-entering the
  * application acquire wrapper would compete with its own output priority and
  * recursively lock the swapchain. Only queue host entrypoints are wrapped. */
-#ifdef GFG_NATIVE_WITH_TE
+#if defined(GFG_NATIVE_WITH_TE) || defined(GFG_NATIVE_TEST_QUEUE_OBSERVE)
 static VKAPI_ATTR VkResult VKAPI_CALL native_worker_QueueWaitIdle(VkQueue q) {
     native_device *d=find_device(dispatch_key(q));
     if(!d || !d->queue_idle)return VK_ERROR_INITIALIZATION_FAILED;
     pthread_mutex_lock(&d->queue_lock);VkResult r=d->queue_idle(q);
+    if(r==VK_SUCCESS && d->queue_observer)gsf_qo_idle(d->queue_observer,q);
     pthread_mutex_unlock(&d->queue_lock);return r;
 }
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL native_worker_gdpa(VkDevice device, const char *name) {
     native_device *d = find_device(dispatch_key(device));
     if (!d || !name) return NULL;
     if (!strcmp(name,"vkQueueWaitIdle")) return (PFN_vkVoidFunction)native_worker_QueueWaitIdle;
-    if (!strcmp(name,"vkQueueSubmit")) return (PFN_vkVoidFunction)native_QueueSubmit;
-    if (!strcmp(name,"vkQueueSubmit2")) return d->submit2 ? (PFN_vkVoidFunction)native_QueueSubmit2 : NULL;
-    if (!strcmp(name,"vkQueueSubmit2KHR")) return d->submit2_khr ? (PFN_vkVoidFunction)native_QueueSubmit2KHR : NULL;
+    if (!strcmp(name,"vkQueueSubmit")) return (PFN_vkVoidFunction)native_worker_QueueSubmit;
+    if (!strcmp(name,"vkQueueSubmit2")) return d->submit2 ? (PFN_vkVoidFunction)native_worker_QueueSubmit2 : NULL;
+    if (!strcmp(name,"vkQueueSubmit2KHR")) return d->submit2_khr ? (PFN_vkVoidFunction)native_worker_QueueSubmit2KHR : NULL;
     return d->gdpa(device,name);
 }
 #endif
@@ -941,6 +1045,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_QueueWaitIdle(VkQueue q) {
     /* Always wait the real GPU queue even if a previous WSI job failed. */
     native_drain_device(d);
     pthread_mutex_lock(&d->queue_lock); VkResult r = d->queue_idle(q);
+    if(r==VK_SUCCESS && d->queue_observer)gsf_qo_idle(d->queue_observer,q);
     pthread_mutex_unlock(&d->queue_lock); return r;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL native_DeviceWaitIdle(VkDevice device) {
@@ -948,6 +1053,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_DeviceWaitIdle(VkDevice device) {
     if (!d || !d->device_idle) return VK_ERROR_INITIALIZATION_FAILED;
     native_drain_device(d);
     pthread_mutex_lock(&d->queue_lock); VkResult r = d->device_idle(device);
+    if(r==VK_SUCCESS && d->queue_observer)gsf_qo_idle(d->queue_observer,VK_NULL_HANDLE);
     pthread_mutex_unlock(&d->queue_lock); return r;
 }
 #define QUEUE_VOID_LABEL(name, field) \
@@ -1063,6 +1169,7 @@ native_DestroyDevice(VkDevice device, const VkAllocationCallbacks *alloc) {
     found->destroy(device, alloc);
     pthread_mutex_destroy(&found->lock);
     pthread_mutex_destroy(&found->queue_lock);
+    free(found->queue_observer);
     free(found);
 }
 
@@ -1871,13 +1978,16 @@ native_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *info) {
                 for (native_queue *q = d->queues; q; q = q->next) {
                     if (q->handle != queue) continue;
                     gfg_gpu_fg_create_info gi = {
+                        .frontend_hint=d->instance->frontend_hint,.engine_version=d->instance->engine_version,
+                        .instance_api_version=d->instance->api_version,
                         .instance = d->instance->handle, .gipa = d->instance->gipa,
                         .physical = d->physical, .device = d->handle,
                         .gdpa = d->async_output ? native_worker_gdpa : d->gdpa,
                         .swapchain = sc->handle, .extent = sc->extent, .format = sc->format, .color_space=sc->color_space,
                         .present_mode = sc->present_mode, .force_fifo=sc->force_fifo, .queue = queue,
                         .family = q->family, .semaphore_fd = d->semaphore_fd, .display_timing=d->display_timing, .calibrated_mode=d->calibrated_mode,
-                        .set_loader_data = d->set_loader_data};
+                        .set_loader_data = d->set_loader_data,
+                        .queue_probe = d->queue_observer ? native_queue_probe : NULL};
                     sc->gpu = gfg_gpu_fg_create(&gi);
                     if (native_env_is_1("GFG_NATIVE_REAL_WSI_PROBE"))
                         fprintf(stderr,"GSF_REAL_WSI_GPU_BRIDGE_CREATE"
@@ -2127,6 +2237,14 @@ native_gdpa(VkDevice device, const char *symbol) {
     if (d->present) HOOK(QueuePresentKHR);
     if (d->acquire) HOOK(AcquireNextImageKHR);
     if (d->acquire2) HOOK(AcquireNextImage2KHR);
+    if(d->queue_observer) {
+        if (d->fence_status) HOOK(GetFenceStatus);
+        if (d->wait_fences) HOOK(WaitForFences);
+        if (d->import_fence_fd) HOOK(ImportFenceFdKHR);
+        if (d->get_fence_fd) HOOK(GetFenceFdKHR);
+        if (d->reset_fences) HOOK(ResetFences);
+        if (d->destroy_fence) HOOK(DestroyFence);
+    }
     if (d->submit) HOOK(QueueSubmit);
     if (d->submit2) HOOK(QueueSubmit2);
     if (d->submit2_khr) HOOK(QueueSubmit2KHR);
@@ -2168,6 +2286,11 @@ native_gipa(VkInstance instance, const char *symbol) {
     HOOK(DestroyInstance);
     HOOK(CreateDevice);
     if (!instance) return NULL;
+    if(native_env_is_1("GFG_NATIVE_QUEUE_OBSERVE")) {
+        HOOK(GetFenceStatus); HOOK(WaitForFences);
+        HOOK(ImportFenceFdKHR); HOOK(GetFenceFdKHR);
+        HOOK(ResetFences); HOOK(DestroyFence);
+    }
     HOOK(QueueSubmit); HOOK(QueueSubmit2); HOOK(QueueSubmit2KHR); HOOK(QueueBindSparse);
     HOOK(QueueWaitIdle); HOOK(DeviceWaitIdle);
     HOOK(QueueBeginDebugUtilsLabelEXT); HOOK(QueueEndDebugUtilsLabelEXT); HOOK(QueueInsertDebugUtilsLabelEXT);

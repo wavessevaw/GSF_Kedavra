@@ -8,7 +8,7 @@ ENABLE_CPU_BRIDGE ?= 0
 TE_LIB ?= ../gfg-temporal/build/libgfg-temporal.a
 ifeq ($(ENABLE_TE),1)
 NATIVE_SOURCES := src/layer.c src/gpu_bridge.c src/output_worker.c
-NATIVE_HEADERS := src/cpu_bridge.h src/gpu_bridge.h src/output_worker.h src/frame_clock.h src/timeline_watch.h src/calibrated_clock.h src/generation_budget.h src/wsi_queries.inc src/present_ids.h src/present_chain.h src/past_timing.h src/memory_policy.h src/swapchain_chain.h ../gfg-temporal/src/te_engine.h
+NATIVE_HEADERS := src/refresh_observation.h src/queue_observation.h src/cpu_bridge.h src/gpu_bridge.h src/output_worker.h src/frame_clock.h src/timeline_watch.h src/calibrated_clock.h src/generation_budget.h src/wsi_queries.inc src/present_ids.h src/present_chain.h src/past_timing.h src/memory_policy.h src/swapchain_chain.h ../gfg-temporal/src/te_engine.h
 NATIVE_CPPFLAGS := -DGFG_NATIVE_WITH_TE -I../gfg-temporal/src
 ifeq ($(ENABLE_CPU_BRIDGE),1)
 NATIVE_SOURCES += src/cpu_bridge.c
@@ -18,7 +18,7 @@ NATIVE_LDLIBS := $(TE_LIB) -ldl -lm
 NATIVE_DEPS := $(TE_LIB)
 else
 NATIVE_SOURCES := src/layer.c
-NATIVE_HEADERS := src/swapchain_chain.h
+NATIVE_HEADERS := src/queue_observation.h src/swapchain_chain.h
 NATIVE_CPPFLAGS :=
 NATIVE_LDLIBS :=
 NATIVE_DEPS :=
@@ -32,6 +32,14 @@ $(BUILD)/frame-clock: tests/frame_clock.c src/frame_clock.h
 frame-clock: $(BUILD)/frame-clock
 	$(BUILD)/frame-clock tests/fixtures/ac-origins-deadline-slack.csv
 .PHONY: frame-clock
+
+$(BUILD)/queue-observation: tests/queue_observation.c src/queue_observation.h
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -I$(VULKAN_HEADERS) -o $@ $<
+
+queue-observation: $(BUILD)/queue-observation
+	$(BUILD)/queue-observation
+.PHONY: queue-observation
 
 # Test-only VkImage source allocations; NOT wired into live swapchain create.
 $(BUILD)/offscreen-source-pool: tests/offscreen_source_pool.c src/offscreen_source_pool.h
@@ -200,7 +208,7 @@ $(BUILD)/output-worker: tests/output_worker.c src/output_worker.c src/output_wor
 output-worker: $(BUILD)/output-worker
 	$(BUILD)/output-worker
 
-$(BUILD)/queue-serialization: tests/queue_serialization.c src/layer.c
+$(BUILD)/queue-serialization: tests/queue_serialization.c src/layer.c src/queue_observation.h
 	mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -Wno-unused-function -I$(VULKAN_HEADERS) -o $@ tests/queue_serialization.c -lpthread
 
@@ -346,7 +354,7 @@ $(BUILD)/calibration-clock: tests/calibration_clock.c src/calibrated_clock.h tes
 	$(CC) $(CFLAGS) -pthread -Itests/stubs -o $@ tests/calibration_clock.c
 
 calibration-clock: $(BUILD)/calibration-clock
-	$(BUILD)/calibration-clock
+	$(BUILD)/calibration-clock tests/fixtures/software-submit-overlap-20261019.csv
 .PHONY: calibration-clock
 
 $(BUILD)/generation-budget: tests/generation_budget.c src/generation_budget.h
@@ -356,3 +364,11 @@ $(BUILD)/generation-budget: tests/generation_budget.c src/generation_budget.h
 generation-budget: $(BUILD)/generation-budget
 	$(BUILD)/generation-budget tests/fixtures/deck-calibrated-slack-20261019.csv
 .PHONY: generation-budget
+
+$(BUILD)/refresh-observation: tests/refresh_observation.c src/refresh_observation.h
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -I$(VULKAN_HEADERS) -o $@ $<
+
+refresh-observation: $(BUILD)/refresh-observation
+	$(BUILD)/refresh-observation
+.PHONY: refresh-observation

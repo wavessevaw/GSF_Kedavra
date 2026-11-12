@@ -6,6 +6,11 @@ on:
       - 'engine/gfg-native/src/**'
       - 'engine/gfg-native/tests/wsi_gpu_smoke.c'
       - 'engine/gfg-native/tests/render_readiness*'
+      - 'engine/gfg-native/tests/*recovery_report.py'
+      - 'engine/gfg-native/tests/queue_observation.c'
+      - 'engine/gfg-native/tests/refresh_observation.c'
+      - 'engine/gfg-native/tests/calibration_clock.c'
+      - 'engine/gfg-native/tests/fixtures/software-submit-overlap-20261019.csv'
       - 'engine/gfg-native/Makefile'
       - 'engine/gfg-temporal/src/**'
       - '.github/workflows/gsf-render-readiness-lab.yml'
@@ -32,6 +37,10 @@ jobs:
         run: |
           make -C engine/gfg-temporal lib
           make -C engine/gfg-native ENABLE_TE=1 BUILD=build-readiness VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" layer build-readiness/wsi-gpu-smoke
+      - name: Queue observation lifetime and recovery classification contracts
+        run: |
+          make -C engine/gfg-native VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" queue-observation queue-serialization refresh-observation calibration-clock
+          python3 -m unittest discover -s engine/gfg-native/tests -p test_recovery_report.py
       - name: Actual delayed application rendering, admission A/B and recovery
         run: |
           export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"

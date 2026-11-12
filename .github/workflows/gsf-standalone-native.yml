@@ -26,7 +26,7 @@ jobs:
           test -s engine/gfg-native/build-standalone/libVkLayer_gfg_native.so
       - name: Native deterministic ownership and FIFO contracts
         run: |
-          make -C engine/gfg-native VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" timeline-watch calibration-clock generation-budget output-owner virtual-source frame-clock present-ids present-chain output-worker offscreen-source-pool
+          make -C engine/gfg-native VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" timeline-watch calibration-clock generation-budget queue-observation queue-serialization output-owner virtual-source frame-clock present-ids present-chain output-worker offscreen-source-pool
       - name: Legacy Gamescope feedback and production desired-time packets
         run: |
           make -C engine/gfg-native VULKAN_HEADERS="$RUNNER_TEMP/vkh/include" past-timing presentation-timing swapchain-policy gpu-ring
