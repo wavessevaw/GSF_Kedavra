@@ -1,22 +1,9 @@
-# Kedavra 1.6.1 compatibility runtime
+# GSF Kedavra 1.6.1
 
-This build extends the accepted Kedavra 1.6.0 engine with GFG Benchmark HUD input
-and native displayed-frame interval telemetry. Focus, optical flow, warp and the
-Silk scheduler are unchanged.
+Restores centred HUD panels used by the existing GFG Benchmark interface. Touch coordinates follow the displayed panel. Includes the 1.6.1 shared-controller lease and native frame telemetry. Focus, shaders, interpolation and the Silk scheduler are unchanged.
 
-The standalone panel participates in the shared controller lease: GFG has priority
-while loaded; standalone commands and HUD pause, then resume after GFG releases
-control. Existing preferences are retained. Both panels must use the compatible
-controller implementation; the old 1.6.0 standalone panel cannot honor this lease.
+Install this ZIP in Decky, reinstall Gamescope from Setup and reboot. If GFG is also installed, update both plugins and install the matching GFG runtime last. Standalone Kedavra yields engine control while GFG is active without losing preferences.
 
-Install the full Decky ZIP, reinstall Gamescope from Setup and reboot. Use this
-companion if you keep standalone Kedavra installed alongside GFG 3.4.1. To roll
-back, remove the custom runtime using Setup, reboot, then reinstall the previous
-plugin and its matching runtime.
+Rollback: remove the custom Gamescope runtime in Setup, reboot, then reinstall the prior plugin and its matching runtime. Do not pair an old standalone controller with a new GFG controller.
 
-The HUD extension reserves contacts beginning inside an interactive HUD. Hold for
-0.8 seconds to start a benchmark; moving more than 12 output pixels cancels the
-hold. Normal game touches outside the HUD retain their existing handling.
-
-Automated tests are software checks. No physical Steam Deck measurements or touch
-validation are claimed by the build environment.
+Automated checks do not establish real Steam Deck touch, power or frame-pacing performance. No physical Deck was available for this build.
