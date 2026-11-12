@@ -1,0 +1,25 @@
+--- a/kedavra/shaders/kfg_warp.comp
++++ b/kedavra/shaders/kfg_warp.comp
+@@ -96,17 +96,17 @@
+ 		float best = 1e9;
+ 		sel = cand[own];
+ 		for (int i = 0; i < 4; i++) {
+-			// The own block wins identical motion by its bias. Avoid two colour
+-			// reads for duplicates, common on clamped borders and straight edges.
+-			if (i != own && cand[i].xy == cand[own].xy)
+-				continue;
+ 			vec2 v = cand[i].xy * sc;
+ 			vec2 a_pos = vec2(p) - u_t * v;
+ 			vec2 b_pos = vec2(p) + (1.0 - u_t) * v;
+ 			// Clamped colour is not evidence of a match: use the pair's stored
+ 			// residual where the two-sided photometric test is unavailable.
++			bool photo_valid = edge_distance(a_pos, size) >= 0.0 && edge_distance(b_pos, size) >= 0.0;
++			// Equal geometry shares photometric error, but not the stored OOB residual.
++			if (photo_valid && i != own && cand[i].xy == cand[own].xy)
++				continue;
+ 			float e = cand[i].w;
+-			if (edge_distance(a_pos, size) >= 0.0 && edge_distance(b_pos, size) >= 0.0) {
++			if (photo_valid) {
+ 				vec3 a = kfg_tap(0, a_pos, size).rgb;
+ 				vec3 b = kfg_tap(1, b_pos, size).rgb;
+ 				e = dot(abs(a - b), vec3(1.0));

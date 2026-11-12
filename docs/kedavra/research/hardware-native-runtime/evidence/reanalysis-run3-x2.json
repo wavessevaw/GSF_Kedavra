@@ -1,0 +1,93 @@
+{
+  "checks": {
+    "missed_below_0.5pct": false,
+    "no_oscillation": true,
+    "no_reorder": true,
+    "p95_interval_error": false,
+    "p99_interval_error": false,
+    "uniform_content_steps": false
+  },
+  "compose_late": 0,
+  "content_step_irregular_fraction": 0.3186675919500347,
+  "content_steps": {
+    "1": 4909,
+    "2": 1695,
+    "3": 578,
+    "4": 14,
+    "5": 2,
+    "17": 1,
+    "22": 1,
+    "24": 1,
+    "29": 1,
+    "36": 1,
+    "58": 1,
+    "79": 1
+  },
+  "duration_s": 115.130941,
+  "estimated_refresh_slots": 10363,
+  "generated_per_interval": {
+    "1": 1892,
+    "2": 1209,
+    "3": 140,
+    "4": 2
+  },
+  "generated_per_locked_interval": {},
+  "hitches_per_min": 803.0855927773578,
+  "interval_error_ms": {
+    "max": 844.429383,
+    "p50": 0.000383,
+    "p95": 22.221383,
+    "p99": 22.223383
+  },
+  "kinds": {
+    "gen": 4740,
+    "real": 2466,
+    "repeat": 276
+  },
+  "latency_drift_ms": null,
+  "latency_ms": null,
+  "locked_interval_fraction": null,
+  "missed_fraction": 0.3046415130753643,
+  "motion": {
+    "even": 3574,
+    "freeze": 266,
+    "jump": 1275
+  },
+  "origin": "historical-deck-trace-reanalysis",
+  "oscillation_fraction": 0,
+  "pass": false,
+  "phases": {
+    "1/2": 1386,
+    "1/3": 1202,
+    "1/4": 282,
+    "1/5": 19,
+    "1/6": 3,
+    "2/3": 1353,
+    "2/5": 19,
+    "3/4": 420,
+    "3/5": 17,
+    "4/5": 32,
+    "5/6": 5
+  },
+  "provenance": {
+    "analyzer_sha256": "083c0f6b14ab3da0e0ea546714c0c5a0345432aa217be3f3a63153db18d96d20",
+    "image_content_observed": false,
+    "kedavra_sha": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+    "new_hardware_measurement": false,
+    "trace_file": "trace-run3-x2.csv",
+    "trace_sha256": "2e2e56986426b08da19535e71a27942d899ede2d8a2fd1d99f9831f1596bb5d8"
+  },
+  "refresh_hz": 90.0040024779902,
+  "reorders": 0,
+  "repeat_reasons": {
+    "cadence": 2,
+    "me_late": 20,
+    "source_late": 183,
+    "warmup": 71
+  },
+  "repeat_row_fraction": 0.03688853247794707,
+  "rows": 7482,
+  "skips": 2288,
+  "slot_count_basis": "fixed-refresh timestamps; lossless trace assumed",
+  "unobserved_slots": 2881
+}

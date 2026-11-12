@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "date": "2026-10-24",
+  "validation_type": "documentation and historical trace reanalysis",
+  "runtime_modified": false,
+  "new_hardware_tests": false,
+  "required_markdown_files": 11,
+  "relative_links_checked": 34,
+  "mermaid_blocks_syntax_not_rendered": 6,
+  "python_ast": "pass",
+  "json_parse": "pass",
+  "reanalysis": [
+    {
+      "input": "trace-20261021-105329-auto-x3.csv.gz",
+      "git_blob": "a750e6b75fb595b0eedfccdf1fb90fef52df7c50",
+      "sha256": "2a80f40a7d1044b3ca3c5200da5708e14b93b0faa971fb6044e8ac45d5b8d45e",
+      "rows": 75214,
+      "unobserved_slots": 384,
+      "missed_fraction": 0.007751527818196249,
+      "matches_committed_report": true
+    },
+    {
+      "input": "trace-run3-x2.csv",
+      "git_blob": "4aedda9132941918b05b9acd5ae38d4d15b9eca2",
+      "sha256": "2e2e56986426b08da19535e71a27942d899ede2d8a2fd1d99f9831f1596bb5d8",
+      "rows": 7482,
+      "unobserved_slots": 2881,
+      "missed_fraction": 0.3046415130753643,
+      "matches_committed_report": true
+    }
+  ],
+  "errors": [],
+  "limitations": [
+    "No Steam Deck connected.",
+    "Probe shell script not run on SteamOS.",
+    "Mermaid source checked for balanced fences; no renderer used.",
+    "No runtime build/test performed because runtime is unchanged."
+  ],
+  "pinned_source_links": {
+    "links": 174,
+    "errors": []
+  },
+  "source_inventory_count": 128
+}

@@ -1,0 +1,1046 @@
+{
+  "schema": 1,
+  "research_date": "2026-10-24",
+  "base_commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+  "hardware_available": false,
+  "source_roots": {
+    "k": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+    "g": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+    "m": "d246f60ddf53089faa1d554865f7a38a737ed388",
+    "mt": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+    "l": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+    "f": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+    "v": "a8b088a3fae12c8575407ea90c7c09bd653db923"
+  },
+  "notes": [
+    "Mesa transported through source mirror by full object SHA; canonical GitLab web fetch unavailable.",
+    "Kernel v6.16 is reference only; installed SteamOS kernel manifest is missing.",
+    "Source retrieval inventory is not a claim of hardware performance."
+  ],
+  "sources": [
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": ".github/workflows/kedavra.yml",
+      "lines": 218,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/.github/workflows/kedavra.yml"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "decky/py_modules/gsf_amdgpu.py",
+      "lines": 105,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/decky/py_modules/gsf_amdgpu.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/DECK_PROTOCOL.md",
+      "lines": 107,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/DECK_PROTOCOL.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/PHASE_A_HISTORY.md",
+      "lines": 186,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/PHASE_A_HISTORY.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "README.ru.md",
+      "lines": 132,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/README.ru.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "decky/py_modules/gsf_runtime.py",
+      "lines": 292,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/decky/py_modules/gsf_runtime.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/README.md",
+      "lines": 91,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/README.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/engine-baseline.json",
+      "lines": 669,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/engine-baseline.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/engine-lowbase-baseline.json",
+      "lines": 669,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/engine-lowbase-baseline.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/PHASE_C_EVIDENCE.md",
+      "lines": 106,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/PHASE_C_EVIDENCE.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/PHASE_B_ARCHITECTURE.md",
+      "lines": 131,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/PHASE_B_ARCHITECTURE.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/engine-candidate.json",
+      "lines": 669,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/engine-candidate.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/timing-candidate.txt",
+      "lines": 47,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/timing-candidate.txt"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021-auto/trace-20261021-043758-auto-x3.report.json",
+      "lines": 89,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021-auto/trace-20261021-043758-auto-x3.report.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021-auto/README.md",
+      "lines": 31,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021-auto/README.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/timing-baseline.txt",
+      "lines": 47,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/timing-baseline.txt"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/engine-lowbase-new.json",
+      "lines": 669,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/engine-lowbase-new.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/1.4.1-rc.1/pacing.json",
+      "lines": 524,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/1.4.1-rc.1/pacing.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021-auto/trace-20261021-105329-auto-x3.report.json",
+      "lines": 82,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021-auto/trace-20261021-105329-auto-x3.report.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021/trace-run3-x2.report.json",
+      "lines": 80,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021/trace-run3-x2.report.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021/bench.json",
+      "lines": 41,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021/bench.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021/README.md",
+      "lines": 54,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021/README.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021/trace-run2-x3-manual.report.json",
+      "lines": 75,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021/trace-run2-x3-manual.report.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/deck-20261021/trace-x2-run1.report.json",
+      "lines": 74,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/deck-20261021/trace-x2-run1.report.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/deck/bench.sh",
+      "lines": 12,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/deck/bench.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/deck/install.sh",
+      "lines": 48,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/deck/install.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/deck/probe.sh",
+      "lines": 53,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/deck/probe.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/engine_lavapipe.json",
+      "lines": 40,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/engine_lavapipe.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/deck/rollback.sh",
+      "lines": 13,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/deck/rollback.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "docs/kedavra/evidence/model_scenarios.json",
+      "lines": 3186,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/docs/kedavra/evidence/model_scenarios.json"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_smaa_tex.h",
+      "lines": 36,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_smaa_tex.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_vk.h",
+      "lines": 80,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_vk.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_post.h",
+      "lines": 258,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_post.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_vk.c",
+      "lines": 490,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_vk.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_plan.h",
+      "lines": 446,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_plan.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_posttest.c",
+      "lines": 642,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_posttest.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/apply.sh",
+      "lines": 40,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/apply.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/hooks.patch",
+      "lines": 265,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/hooks.patch"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/bundle.sh",
+      "lines": 58,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/bundle.sh"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/src/kfg/kfg.cpp",
+      "lines": 1480,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/src/kfg/kfg.cpp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/README.md",
+      "lines": 41,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/README.md"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/engine/kfg_vktest.c",
+      "lines": 1212,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/engine/kfg_vktest.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/kfg_auto.h",
+      "lines": 250,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/kfg_auto.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/run_scenarios.py",
+      "lines": 147,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/run_scenarios.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/kfg_sched.h",
+      "lines": 711,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/kfg_sched.h"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/compare_pacing.py",
+      "lines": 24,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/compare_pacing.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/gamescope/src/kfg/kfg.hpp",
+      "lines": 54,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/gamescope/src/kfg/kfg.hpp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/kfg_sim.c",
+      "lines": 292,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/kfg_sim.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_me.comp",
+      "lines": 226,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_me.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_common.glsl",
+      "lines": 94,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_common.glsl"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/test_completion_bridge.c",
+      "lines": 42,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/test_completion_bridge.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_copy.comp",
+      "lines": 18,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_copy.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/test_sched.c",
+      "lines": 345,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/test_sched.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/sched/test_auto.c",
+      "lines": 225,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/sched/test_auto.c"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_reduce.comp",
+      "lines": 50,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_reduce.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_smaa_blend.comp",
+      "lines": 17,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_smaa_blend.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_select.comp",
+      "lines": 202,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_select.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_smaa_edge.comp",
+      "lines": 17,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_smaa_edge.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_smaa.glsl",
+      "lines": 30,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_smaa.glsl"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_post.comp",
+      "lines": 540,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_post.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_warp.comp",
+      "lines": 169,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_warp.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_smaa_weight.comp",
+      "lines": 19,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_smaa_weight.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/kfg_stats.comp",
+      "lines": 189,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/kfg_stats.comp"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/Makefile",
+      "lines": 69,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/Makefile"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/tools/kfg_pacing.py",
+      "lines": 322,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/tools/kfg_pacing.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/decky/py_modules/kedavra_ctl.py",
+      "lines": 185,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/decky/py_modules/kedavra_ctl.py"
+    },
+    {
+      "repository": "wavessevaw/GSF_Kedavra",
+      "commit": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+      "path": "kedavra/shaders/smaa/SMAA.hlsl",
+      "lines": 1362,
+      "role": "Kedavra source / tests / archived evidence",
+      "url": "https://github.com/wavessevaw/GSF_Kedavra/blob/5f22938b55f9853f764e927c847d9c1a8d9a8c04/kedavra/shaders/smaa/SMAA.hlsl"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/rendervulkan.hpp",
+      "lines": 1085,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/rendervulkan.hpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/Backends/DRMBackend.cpp",
+      "lines": 4490,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/Backends/DRMBackend.cpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/rendervulkan.cpp",
+      "lines": 4954,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/rendervulkan.cpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/backend.h",
+      "lines": 508,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/backend.h"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/steamcompmgr.cpp",
+      "lines": 11076,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/steamcompmgr.cpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/commit.h",
+      "lines": 92,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/commit.h"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/Timeline.cpp",
+      "lines": 214,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/Timeline.cpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/commit.cpp",
+      "lines": 172,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/commit.cpp"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "src/Timeline.h",
+      "lines": 91,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/src/Timeline.h"
+    },
+    {
+      "repository": "ValveSoftware/gamescope",
+      "commit": "aa289ea5977d8b21b92b0f246f0e8f0c225d180f",
+      "path": "scripts/00-gamescope/displays/valve.steamdeck.oled.lua",
+      "lines": 101,
+      "role": "pinned Gamescope integration base",
+      "url": "https://github.com/ValveSoftware/gamescope/blob/aa289ea5977d8b21b92b0f246f0e8f0c225d180f/scripts/00-gamescope/displays/valve.steamdeck.oled.lua"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/autopilot.py",
+      "lines": 71,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/autopilot.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/power_split.py",
+      "lines": 405,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/power_split.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/steamos_tdp.py",
+      "lines": 159,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/steamos_tdp.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/governor_power.py",
+      "lines": 657,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/governor_power.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/governor_device.py",
+      "lines": 91,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/governor_device.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/gpu_clock_control.py",
+      "lines": 195,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/gpu_clock_control.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/governor.py",
+      "lines": 726,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/governor.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/gpu_clock.py",
+      "lines": 273,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/gpu_clock.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/policy.py",
+      "lines": 277,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/policy.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/pilot.py",
+      "lines": 474,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/pilot.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/kedavra/ctl.py",
+      "lines": 179,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/kedavra/ctl.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/engine_gate.py",
+      "lines": 51,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/engine_gate.py"
+    },
+    {
+      "repository": "wavessevaw/GFG-Extreme",
+      "commit": "6b22036b503006f63956b8919cdaa9bf91f1a3c3",
+      "path": "py_modules/gfg_plugin/service.py",
+      "lines": 401,
+      "role": "external Governor source",
+      "url": "https://github.com/wavessevaw/GFG-Extreme/blob/6b22036b503006f63956b8919cdaa9bf91f1a3c3/py_modules/gfg_plugin/service.py"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_queue.h",
+      "lines": 138,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_queue.h"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_pipeline_compute.c",
+      "lines": 357,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_pipeline_compute.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_physical_device.c",
+      "lines": 3291,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_physical_device.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/winsys/amdgpu/radv_amdgpu_cs.c",
+      "lines": 2030,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/winsys/amdgpu/radv_amdgpu_cs.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_queue.c",
+      "lines": 2041,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_queue.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_image.c",
+      "lines": 2007,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_image.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_pipeline.c",
+      "lines": 1266,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_pipeline.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/common/ac_gpu_info.c",
+      "lines": 2361,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/common/ac_gpu_info.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "d246f60ddf53089faa1d554865f7a38a737ed388",
+      "path": "src/amd/vulkan/radv_device.c",
+      "lines": 1871,
+      "role": "Mesa revision prefix from historical hardware bench",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/d246f60ddf53089faa1d554865f7a38a737ed388/src/amd/vulkan/radv_device.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/drm_atomic_uapi.c",
+      "lines": 1560,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/drm_atomic_uapi.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_cs.c",
+      "lines": 1845,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_cs.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "Documentation/gpu/amdgpu/module-parameters.rst",
+      "lines": 8,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/Documentation/gpu/amdgpu/module-parameters.rst"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c",
+      "lines": 993,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "Documentation/gpu/drm-kms.rst",
+      "lines": 652,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/Documentation/gpu/drm-kms.rst"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/drm_prime.c",
+      "lines": 1086,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/drm_prime.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "Documentation/gpu/amdgpu/thermal.rst",
+      "lines": 171,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/Documentation/gpu/amdgpu/thermal.rst"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c",
+      "lines": 12859,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c",
+      "lines": 3119,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c",
+      "lines": 10255,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "include/uapi/drm/amdgpu_drm.h",
+      "lines": 1634,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/include/uapi/drm/amdgpu_drm.h"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/scheduler/sched_main.c",
+      "lines": 1495,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/scheduler/sched_main.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/display/dc/resource/dcn301/dcn301_resource.c",
+      "lines": 1737,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/display/dc/resource/dcn301/dcn301_resource.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_job.c",
+      "lines": 497,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_job.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c",
+      "lines": 3160,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/display/dc/core/dc_resource.c",
+      "lines": 5614,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/display/dc/core/dc_resource.c"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/amdgpu/amdgpu_trace.h",
+      "lines": 596,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/amdgpu/amdgpu_trace.h"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_trace.h",
+      "lines": 735,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_trace.h"
+    },
+    {
+      "repository": "torvalds/linux",
+      "commit": "038d61fd642278bab63ee8ef722c50d10ab01e8f",
+      "path": "drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_plane.c",
+      "lines": 1912,
+      "role": "reference upstream kernel, installed Deck kernel unknown",
+      "url": "https://github.com/torvalds/linux/blob/038d61fd642278bab63ee8ef722c50d10ab01e8f/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_plane.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/vulkan/radv_queue.h",
+      "lines": 138,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/vulkan/radv_queue.h"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/vulkan/winsys/amdgpu/radv_amdgpu_winsys.c",
+      "lines": 368,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/vulkan/winsys/amdgpu/radv_amdgpu_winsys.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/vulkan/radv_image.c",
+      "lines": 2025,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/vulkan/radv_image.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/vulkan/radv_queue.c",
+      "lines": 2072,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/vulkan/radv_queue.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/common/ac_gpu_info.c",
+      "lines": 2441,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/common/ac_gpu_info.c"
+    },
+    {
+      "repository": "chaotic-cx/mesa-mirror",
+      "commit": "c10cba7efaa003e11c5c832bb2347e55c619ae7a",
+      "path": "src/amd/vulkan/radv_physical_device.c",
+      "lines": 3319,
+      "role": "comparison tag mesa-26.0.0, not installed driver claim",
+      "url": "https://github.com/chaotic-cx/mesa-mirror/blob/c10cba7efaa003e11c5c832bb2347e55c619ae7a/src/amd/vulkan/radv_physical_device.c"
+    },
+    {
+      "repository": "KhronosGroup/Vulkan-Docs",
+      "commit": "a8b088a3fae12c8575407ea90c7c09bd653db923",
+      "path": "chapters/devsandqueues.adoc",
+      "lines": 4302,
+      "role": "normative API source",
+      "url": "https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/chapters/devsandqueues.adoc"
+    },
+    {
+      "repository": "KhronosGroup/Vulkan-Docs",
+      "commit": "a8b088a3fae12c8575407ea90c7c09bd653db923",
+      "path": "chapters/synchronization.adoc",
+      "lines": 8683,
+      "role": "normative API source",
+      "url": "https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/chapters/synchronization.adoc"
+    },
+    {
+      "repository": "KhronosGroup/Vulkan-Docs",
+      "commit": "a8b088a3fae12c8575407ea90c7c09bd653db923",
+      "path": "appendices/VK_KHR_external_semaphore_fd.adoc",
+      "lines": 45,
+      "role": "normative API source",
+      "url": "https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/appendices/VK_KHR_external_semaphore_fd.adoc"
+    },
+    {
+      "repository": "KhronosGroup/Vulkan-Docs",
+      "commit": "a8b088a3fae12c8575407ea90c7c09bd653db923",
+      "path": "appendices/VK_EXT_subgroup_size_control.adoc",
+      "lines": 90,
+      "role": "normative API source",
+      "url": "https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/appendices/VK_EXT_subgroup_size_control.adoc"
+    }
+  ]
+}

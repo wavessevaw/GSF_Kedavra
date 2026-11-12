@@ -1,0 +1,53 @@
+{
+  "baseline": "5f22938b55f9853f764e927c847d9c1a8d9a8c04",
+  "kind": "CPU selection model, not GPU execution",
+  "seed": 14120261025,
+  "me_equivalence_cases": 32187,
+  "warp_reference_cases": 50000,
+  "sad_call_models": {
+    "all_equal": {
+      "release_sad_calls": 6,
+      "proposal_sad_calls": 1
+    },
+    "five_equal": {
+      "release_sad_calls": 6,
+      "proposal_sad_calls": 2
+    },
+    "all_unique": {
+      "release_sad_calls": 6,
+      "proposal_sad_calls": 6
+    }
+  },
+  "oob_counterexample": {
+    "release_vector": [
+      0,
+      0
+    ],
+    "proposal_vector": [
+      64,
+      0
+    ],
+    "reference_vector": [
+      64,
+      0
+    ],
+    "pixel": [
+      2,
+      102
+    ],
+    "phase": 0.5,
+    "size": [
+      1280,
+      800
+    ],
+    "note": "For v64, A.x=-30 is outside and B.x=34 inside. Third distinct vector wins only in release model."
+  },
+  "proposal_sha256": {
+    "kfg_me.comp": "31ee04640add062f1bc29f19974cb971e20818216e5b2772ee5333ce923c4043",
+    "kfg_warp.comp": "25115c38df4fb20b4c883d36b3cb70058d661f20472128f195f58dc2e8a43c42"
+  },
+  "gpu_speedup": "Not measured",
+  "power_delta": "Not measured",
+  "input_latency_delta": "Not measured",
+  "pixel_quality_delta": "Not measured"
+}

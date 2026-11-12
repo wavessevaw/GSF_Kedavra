@@ -1,0 +1,17 @@
+--- a/kedavra/shaders/kfg_select.comp
++++ b/kedavra/shaders/kfg_select.comp
+@@ -95,9 +95,11 @@
+ 			best = vec4(v, nb[i].z, c);
+ 		}
+ 	}
+-	if (best.xy != nb[4].xy)
+-		best.z = mix(best.z, u_t < 0.5 ? 0.0 : 1.0, smoothstep(0.10, 0.20, best.w));
+-	else
++	if (best.xy != nb[4].xy) {
++		// A pair field stores phase-independent visibility; warp applies the lean.
++		if ((u_flags & KFG_FLAG_PAIR) == 0)
++			best.z = mix(best.z, u_t < 0.5 ? 0.0 : 1.0, smoothstep(0.10, 0.20, best.w));
++	} else
+ 		best = nb[4];
+ 	imageStore(dst, p, best);
+ }
