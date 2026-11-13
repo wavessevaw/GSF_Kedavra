@@ -1,0 +1,15 @@
+{
+ "device": "llvmpipe (LLVM 19.1.7, 256 bits)",
+ "driver": "llvmpipe Mesa 25.0.7-2+deb13u1 (LLVM 19.1.7)",
+ "size": [1280, 800],
+ "scenes": [
+  {"scene": "pan", "dynamic": true, "cut_flag": 0, "bad_fraction": 0.0241, "phases": [
+   {"t": 0.333333, "psnr_gen": 34.480, "psnr_blend": 17.235, "psnr_dup": 16.216, "region_gen": 34.480, "region_blend": 17.235, "region_dup": 16.216, "mean_abs_vs_A": 25.287, "mean_abs_vs_B": 33.396, "hud_err": 0.000, "errgrad": 1.4966, "blk": -0.02986, "pass": true},
+   {"t": 0.666667, "psnr_gen": 35.482, "psnr_blend": 17.244, "psnr_dup": 16.232, "region_gen": 35.482, "region_blend": 17.244, "region_dup": 16.232, "mean_abs_vs_A": 33.418, "mean_abs_vs_B": 25.304, "hud_err": 0.000, "errgrad": 1.4644, "blk": -0.01645, "pass": true},
+   {"t": 0.500000, "psnr_gen": 34.304, "psnr_blend": 16.583, "psnr_dup": 15.090, "region_gen": 34.304, "region_blend": 16.583, "region_dup": 15.090, "mean_abs_vs_A": 31.263, "mean_abs_vs_B": 31.287, "hud_err": 0.000, "errgrad": 1.5014, "blk": -0.02880, "pass": true}
+  ]}
+ ],
+ "blockiness": {"errgrad": 1.4875, "blk": -0.02504, "outputs": 3},
+ "bench": {"reps": 5, "passes": [{"pass": "reduce", "median_ms": 0.7662, "mean_ms": 0.7675, "p95_ms": 0.7786, "p99_ms": 0.7786}, {"pass": "reduce", "median_ms": 0.2104, "mean_ms": 0.2157, "p95_ms": 0.2317, "p99_ms": 0.2317}, {"pass": "reduce", "median_ms": 0.1282, "mean_ms": 0.1255, "p95_ms": 0.1407, "p99_ms": 0.1407}, {"pass": "reduce", "median_ms": 0.0729, "mean_ms": 0.0681, "p95_ms": 0.0892, "p99_ms": 0.0892}, {"pass": "me", "median_ms": 6.1778, "mean_ms": 6.1825, "p95_ms": 6.2186, "p99_ms": 6.2186}, {"pass": "global", "median_ms": 0.5891, "mean_ms": 0.5930, "p95_ms": 0.6129, "p99_ms": 0.6129}, {"pass": "me", "median_ms": 8.9967, "mean_ms": 14.0660, "p95_ms": 34.4728, "p99_ms": 34.4728}, {"pass": "me", "median_ms": 11.9235, "mean_ms": 17.1938, "p95_ms": 38.2022, "p99_ms": 38.2022}, {"pass": "stats", "median_ms": 0.8881, "mean_ms": 0.8841, "p95_ms": 0.8910, "p99_ms": 0.8910}, {"pass": "select", "median_ms": 5.0307, "mean_ms": 5.0315, "p95_ms": 5.0674, "p99_ms": 5.0674}, {"pass": "repair", "median_ms": 1.5975, "mean_ms": 1.6155, "p95_ms": 1.7056, "p99_ms": 1.7056}, {"pass": "repair", "median_ms": 1.5688, "mean_ms": 1.5641, "p95_ms": 1.5721, "p99_ms": 1.5721}, {"pass": "g1:warp", "median_ms": 12.3097, "mean_ms": 12.5082, "p95_ms": 13.3301, "p99_ms": 13.3301}, {"pass": "g2:warp", "median_ms": 12.1754, "mean_ms": 23.2619, "p95_ms": 41.4892, "p99_ms": 41.4892}], "analysis_ms": 37.9499, "two_outputs_ms": 24.4852},
+ "failures": 0
+}

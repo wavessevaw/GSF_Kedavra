@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Hierarchical bidirectional block motion estimation, one level per dispatch.
+//
+// Slots: 0 = luma A at this level, 1 = luma B at this level, 2 = flow of the
+// coarser level (ignored on the coarsest level). Output texel = one block of
+// 2^level pixels: xy = forward motion A->B, zw = backward motion B->A, both in
+// full-resolution pixels.
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "kfg_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// SAD window: 5x5 texels on the coarse levels, 3x3 on the finest searched level (2),
+// where a texel is already a 4x4 pixel block and the window cost dominated the
+// analysis on the Deck (2.4 of 4.8 ms). Constant bounds keep both loops unrolled.
+// The block's own window does not move with the candidate: it is read once per search
+// (g_win) and only the displaced window is sampled per candidate, half the taps.
+bool g_small = false;
+// Mean absolute luma difference under which a candidate is taken without searching further.
+const float k_good = 0.004;
+float g_win[25];
+
+void load_window(int sa, vec2 q, ivec2 size)
+{
+	const int W = g_small ? 1 : 2;
+	for (int y = -W; y <= W; y++)
+		for (int x = -W; x <= W; x++)
+			g_win[(y + 2) * 5 + x + 2] = kfg_tap(sa, q + vec2(x, y), size).r;
+}
+
+float sad_w(int sb, vec2 q, vec2 d, ivec2 size, const int W)
+{
+	float e = 0.0;
+	for (int y = -W; y <= W; y++)
+		for (int x = -W; x <= W; x++)
+			e += abs(g_win[(y + 2) * 5 + x + 2] - kfg_tap(sb, q + vec2(x, y) + d, size).r);
+	return e * (1.0 / float((2 * W + 1) * (2 * W + 1)));
+}
+
+float sad(int sa, int sb, vec2 q, vec2 d, ivec2 size)
+{
+	return g_small ? sad_w(sb, q, d, size, 1) : sad_w(sb, q, d, size, 2);
+}
+
+// Research-only exact candidate pruning: all SAD terms are nonnegative.
+// Keep accumulation order and a numerical margin; never reject a near tie.
+float bounded_cost(int sb, vec2 q, vec2 d, ivec2 size, float penalty, float incumbent)
+{
+    int W = g_small ? 1 : 2;
+    float norm = 1.0 / float((2 * W + 1) * (2 * W + 1));
+    float sum = 0.0;
+    for (int y = -W; y <= W; y++) {
+        for (int x = -W; x <= W; x++)
+            sum += abs(g_win[(y + 2) * 5 + x + 2] - kfg_tap(sb, q + vec2(x,y) + d, size).r);
+        if (sum * norm + penalty > incumbent + 0.000001)
+            return 1e9;
+    }
+    return sum * norm + penalty;
+}
+
+// Coarsest level: exhaustive search on a 2-texel lattice, then +-1 around the best lattice
+// point (a texel here is 16 pixels of a tent-filtered image, so the cost surface is smooth
+// at that scale). Temporal seeds (the previous pair's vectors) are scored against their own
+// prediction, so following a turning camera costs nothing; the lattice is scored against
+// zero motion as before.
+vec2 search_coarsest(int sa, int sb, vec2 q, ivec2 size, vec2 seeds[6], int nseed, out float best_cost)
+{
+	vec2 best = vec2(0.0);
+	best_cost = 1e9;
+	const float pen = u_lambda * 0.25 / float(u_radius + 1);
+	// The lattice is centred on the previous pair's camera motion (zero without one), so a
+	// turning camera is searched +-radius around where it already was rather than around
+	// zero: at a low base frame rate (24 FPS) a fast turn moves 150 px and more per source
+	// frame, past a lattice around zero. Zero motion stays a candidate of its own (HUD,
+	// static scenes), scored against the same centre.
+	// Only for a camera already moving more than half the radius: slower motion is well
+	// inside a lattice around zero, and moving the lattice there changed nothing but the
+	// ties on repeating texture (stairs).
+	vec2 g = nseed > 0 ? seeds[nseed - 1] : vec2(0.0);
+	vec2 lc = max(abs(g.x), abs(g.y)) > 0.5 * float(u_radius) ? 2.0 * round(g * 0.5) : vec2(0.0);
+	// The penalty still grows with the distance from zero, not from the centre: a camera
+	// estimate thrown off by repeating texture (stairs) must not pull the vectors with it.
+	best_cost = sad(sa, sb, q, vec2(0.0), size);
+	if (best_cost < k_good)
+		return vec2(0.0);  // static: no search (HUD, sky, a paused scene)
+	for (int i = 0; i < nseed; i++) {
+		// A temporal seed that already matches almost perfectly: the camera kept its motion.
+		float c = sad(sa, sb, q, seeds[i], size);
+		if (c < k_good) {
+			best_cost = c;
+			return seeds[i];
+		}
+	}
+	for (int y = -u_radius; y <= u_radius; y += 2)
+		for (int x = -u_radius; x <= u_radius; x += 2) {
+			vec2 d = lc + vec2(x, y);
+			float c = bounded_cost(sb, q, d, size, pen * (abs(d.x) + abs(d.y)), best_cost);
+			if (c < best_cost) {
+				best_cost = c;
+				best = d;
+			}
+		}
+	vec2 centre = best;
+	vec2 origin = vec2(0.0);
+	for (int i = 0; i < nseed; i++) {
+		vec2 o = i == nseed - 1 ? seeds[i] : seeds[0];  // the last seed is the global motion
+		float c = sad(sa, sb, q, seeds[i], size) + pen * (abs(seeds[i].x - o.x) + abs(seeds[i].y - o.y));
+		if (c < best_cost) {
+			best_cost = c;
+			best = seeds[i];
+			centre = seeds[i];
+			origin = o;
+		}
+	}
+	for (int y = -1; y <= 1; y++)
+		for (int x = -1; x <= 1; x++) {
+			if (x == 0 && y == 0)
+				continue;
+			vec2 d = centre + vec2(x, y);
+			float c = bounded_cost(sb, q, d, size, pen * (abs(d.x - origin.x) + abs(d.y - origin.y)), best_cost);
+			if (c < best_cost) {
+				best_cost = c;
+				best = d;
+			}
+		}
+	return best;
+}
+
+// Best displacement (texels at this level) of block q from slot sa into slot sb.
+vec2 search(int sa, int sb, vec2 q, ivec2 size, vec2 preds[6], int npred, bool coarsest)
+{
+	vec2 best = vec2(0.0);
+	float best_cost = 1e9;
+	vec2 base = preds[0];
+	load_window(sa, q, size);
+	if (coarsest) {
+		best = search_coarsest(sa, sb, q, size, preds, npred, best_cost);
+		base = best;
+	} else {
+		// Evaluate predictors from the coarser level, then refine around the best. The last
+		// predictor is the pair's global (camera) motion: scored against itself, so a block
+		// whose coarse vector landed on a wrong but similar-looking match (flat or repeating
+		// texture) takes the camera motion when it fits as well.
+		vec2 origin = base;
+		for (int i = 0; i < npred; i++) {
+			vec2 o = i == npred - 1 ? preds[i] : base;
+			float c = sad(sa, sb, q, preds[i], size) + u_lambda * 0.1 * (abs(preds[i].x - o.x) + abs(preds[i].y - o.y));
+			if (c < best_cost) {
+				best_cost = c;
+				best = preds[i];
+				origin = o;
+			}
+		}
+		// A predictor that already matches almost perfectly (static content, the camera
+		// motion of a turn that the coarser level found) needs no search around it.
+		if (best_cost < k_good)
+			return best;
+		vec2 centre = best;
+		for (int y = -u_radius; y <= u_radius; y++)
+			for (int x = -u_radius; x <= u_radius; x++) {
+				if (x == 0 && y == 0)
+					continue;
+				vec2 d = centre + vec2(x, y);
+				float c = bounded_cost(sb, q, d, size, u_lambda * 0.1 * (abs(d.x - origin.x) + abs(d.y - origin.y)), best_cost);
+				if (c < best_cost) {
+					best_cost = c;
+					best = d;
+				}
+			}
+		base = origin;
+	}
+	if (best_cost < k_good)
+		return best;
+	// Half-texel refinement with bilinear taps.
+	vec2 centre = best;
+	for (int y = -1; y <= 1; y++)
+		for (int x = -1; x <= 1; x++) {
+			if (x == 0 && y == 0)
+				continue;
+			vec2 d = centre + 0.5 * vec2(x, y);
+			float c = bounded_cost(sb, q, d, size, u_lambda * 0.1 * (abs(d.x - base.x) + abs(d.y - base.y)), best_cost);
+			if (c < best_cost) {
+				best_cost = c;
+				best = d;
+			}
+		}
+	return best;
+}
+
+void main()
+{
+	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(p, u_dstSize)))
+		return;
+	ivec2 size = u_srcSize;            // luma size at this level == flow grid size
+	float scale = float(1 << u_level); // pixels per texel
+	vec2 q = vec2(p);
+	bool coarsest = (u_flags & KFG_FLAG_COARSEST) != 0;
+	g_small = u_level <= 2;
+
+	vec2 pf[6];
+	vec2 pb[6];
+	int npred = 0;
+	if (!coarsest) {
+		ivec2 csize = (u_dstSize + 1) / 2;
+		ivec2 cp = p / 2;
+		ivec2 offs[5] = ivec2[5](ivec2(0, 0), ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+		for (int i = 0; i < 5; i++) {
+			ivec2 c = clamp(cp + offs[i], ivec2(0), csize - 1);
+			vec4 f = texelFetch(s_samplers[2], c, 0);
+			pf[i] = f.xy / scale;
+			pb[i] = f.zw / scale;
+		}
+		vec4 g = kfg_global_at(3, (q + 0.5) * scale);
+		pf[5] = g.xy / scale;
+		pb[5] = g.zw / scale;
+		npred = 6;
+	} else if ((u_flags & KFG_FLAG_TEMPORAL) != 0) {
+		// Previous pair's vectors at this block and its neighbours two texels away, and its
+		// global motion.
+		ivec2 offs[5] = ivec2[5](ivec2(0, 0), ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2));
+		for (int i = 0; i < 5; i++) {
+			vec4 f = texelFetch(s_samplers[2], clamp(p + offs[i], ivec2(0), u_dstSize - 1), 0);
+			pf[i] = f.xy / scale;
+			pb[i] = f.zw / scale;
+		}
+		vec4 g = kfg_global_at(3, (q + 0.5) * scale);
+		pf[5] = g.xy / scale;
+		pb[5] = g.zw / scale;
+		npred = 6;
+	} else {
+		for (int i = 0; i < 6; i++) {
+			pf[i] = vec2(0.0);
+			pb[i] = vec2(0.0);
+		}
+	}
+	vec2 fwd = search(0, 1, q, size, pf, npred, coarsest);
+	vec2 bwd = search(1, 0, q, size, pb, npred, coarsest);
+	imageStore(dst, p, vec4(fwd * scale, bwd * scale));
+}
