@@ -3,7 +3,7 @@ import {callable, definePlugin, toaster} from '@decky/api';
 import {CSSProperties, Fragment, ReactNode, useEffect, useRef, useState} from 'react';
 import {LOGO} from './logo';
 
-const VERSION = '1.6.1';
+const VERSION = '1.7.0';
 
 type Summary = {pass?: boolean; p95_ms?: number; p99_ms?: number; missed_pct?: number; rows?: number; checks?: Record<string, boolean>};
 type Report = {trace: string; report: string; ok: boolean; log: string; summary?: Summary};
@@ -199,10 +199,10 @@ function Content() {
   const installed = diag?.checks.some(c => c.key === 'installed' && c.ok);
   // Auto's caps (kfg_auto.h): refresh / 3 (at least 30), steps of 5, refresh / 2. 90 Hz: 30 / 35 /
   // 40 / 45, and the low floor below them when allowed: 24 or refresh / 4 (90 Hz 24 at ×3.75,
-  // 120 Hz 30 at ×4, 60 Hz 24 at ×2.5).
+  // 120 Hz 30 at ×4, 60 Hz stays at 30 with ×2).
   const hzR = Math.round(hz), capHi = Math.floor(hzR / 2), lo3 = Math.ceil(hzR / 3);
   const capLo = lo3 >= 30 ? lo3 : Math.min(30, capHi);
-  const capFloor = Math.max(24, Math.ceil(hzR / 4));
+  const capFloor = hzR === 60 ? capLo : Math.max(24, Math.ceil(hzR / 4));
   const floorMult = multText(hzR / capFloor), loMult = multText(hzR / capLo);
   const autoCaps = (() => {
     const lo = capLo, hi = capHi, c = [lo];
@@ -408,7 +408,7 @@ function Content() {
     <PanelSectionRow><div className="gsf-green" style={{...card, padding: `2px ${INSET}px`}}>
       {mode === 'cap' && <SliderField label="Base game FPS" value={Math.min(base, hzR)} min={20} max={hzR} step={1} showValue bottomSeparator="standard"
         disabled={busy || !running} onChange={onBase}/>}
-      {mode === 'auto' && !floorInSetup && <ToggleField label={`Allow ${floorMult}`} description={`Base ${capFloor} when the game cannot hold ${capLo}`} checked={x375}
+      {mode === 'auto' && !floorInSetup && capFloor < capLo && <ToggleField label={`Allow ${floorMult}`} description={`Base ${capFloor} when the game cannot hold ${capLo}`} checked={x375}
         disabled={busy || !running} bottomSeparator="standard" onChange={v => setOptions(v, hdr)}/>}
       <ToggleField label="HDR games" checked={hdr} disabled={busy || !running} bottomSeparator="standard" onChange={v => setOptions(x375, v)}/>
       <ToggleField label="In-game HUD" checked={hud} disabled={busy} bottomSeparator="none"

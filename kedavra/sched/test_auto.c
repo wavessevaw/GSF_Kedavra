@@ -155,7 +155,7 @@ int main(void)
 	kfg_auto_init_floor(&lv, 90, 40);
 	CHECK(lv.nlevels == 4 && lv.levels[0] == 30, "a floor above refresh / 3 changes nothing");
 	kfg_auto_init_floor(&lv, 60, 16);
-	CHECK(lv.nlevels == 2 && lv.levels[0] == 24 && lv.levels[1] == 30 && lv.mult == 3, "at 60 Hz the floor is 24 (x2.5), never lower");
+	CHECK(lv.nlevels == 1 && lv.cap == 30 && lv.mult == 2, "60 Hz stays at x2 even with a saved lower floor");
 
 	r = run(fps60, 300, 0.10);
 	printf("native 60:  cap 45 %.1f%%, mean cap %.1f, switches %llu, late %.3f%%\n", 100 * r.x2_fraction, r.cap_avg, (unsigned long long)r.switches, 100 * r.late_fraction);

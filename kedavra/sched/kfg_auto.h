@@ -96,7 +96,7 @@ static inline void kfg_auto_init_floor(kfg_auto *a, uint32_t refresh_hz, uint32_
 	const uint32_t hi = refresh_hz / 2, lo3 = kfg_auto_div_up(refresh_hz, 3);
 	const uint32_t lo = lo3 >= 30u ? lo3 : hi < 30u ? hi : 30u;
 	a->nlevels = 0;
-	if (floor_fps) {
+	if (floor_fps && refresh_hz != 60) {
 		const uint32_t mf = kfg_auto_min_floor(refresh_hz);
 		if (floor_fps < mf)
 			floor_fps = mf;
