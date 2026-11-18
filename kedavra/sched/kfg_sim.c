@@ -262,6 +262,7 @@ int main(int argc, char **argv)
 			d = late_dec;
 			pending_late = false;
 		} else {
+			s.cfg.prefer_real_60 = p.refresh_hz == 60 && mult == 2 && p.cap_fps == 30;
 			d = kfg_sched_decide(&s, k);
 			double c = rng_lognormal(&r, p.compose_ms, p.compose_p99_ms) * 1e6;
 			if (d.show == KFG_SHOW_GEN)

@@ -1279,6 +1279,8 @@ namespace kfg
 			kfg_sched_on_me( &s.sched, ulBaseCommitID, nVBlank + 2, true, false );
 		}
 
+		s.sched.cfg.prefer_real_60 = ulRefreshCycleNs >= 16500000 && ulRefreshCycleNs <= 16800000 &&
+			!pFrameInfo->allowVRR && s.uMultiplier == 2 && SourceCapFPS( 60 ) == 30;
 		s.pending = kfg_sched_decide( &s.sched, nVBlank );
 		s.ulPendingID = ulBaseCommitID;
 		s.nPendingVBlank = nVBlank;

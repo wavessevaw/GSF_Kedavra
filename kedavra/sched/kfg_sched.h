@@ -78,6 +78,7 @@ enum kfg_state {
 
 typedef struct kfg_sched_config {
 	uint32_t multiplier;        // 1 = off, 2 = x2, 3 = x3
+	bool prefer_real_60;        // enable only at fixed 60 Hz with a 30 FPS base
 	uint32_t catchup_streak;    // stable vblanks required before giving latency back
 	uint32_t max_delay;         // vblanks; larger delay resynchronises to the newest source
 	uint32_t me_lag_budget;     // vblanks from latch to usable analysis that are tolerated
@@ -127,6 +128,7 @@ typedef struct kfg_sched {
 	uint32_t last_gen_phase_num;
 	uint32_t ahead_streak;
 	int64_t wall_ref;       // established k - content of the steady cadence; -1 unknown
+	bool last_was_generated;
 	int64_t realign_k;      // vblank of the last realignment
 	enum kfg_state state;
 	bool want_on;
@@ -146,6 +148,7 @@ static inline kfg_sched_config kfg_sched_default_config(uint32_t multiplier)
 {
 	kfg_sched_config c;
 	c.multiplier = multiplier;
+	c.prefer_real_60 = false;
 	c.catchup_streak = 90;   // 1 s at 90 Hz
 	c.max_delay = 12;
 	c.me_lag_budget = 2;  // analysis is split over two vblanks after the latch
@@ -448,6 +451,8 @@ static inline int64_t kfg_sched_lookahead(const kfg_sched *s, int64_t k, int64_t
 // Decide the output for vblank k (strictly increasing between calls).
 static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 {
+	const bool after_gen = s->last_was_generated;
+	s->last_was_generated = false;
 	kfg_decision d;
 	memset(&d, 0, sizeof(d));
 	const kfg_source_slot *newest = kfg_sched_slot(s, 0);
@@ -581,6 +586,25 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		cand = kfg_sched_eval_pos(s, p, k);
 	}
 
+	// When a pair has already supplied one intermediate, take its ready real endpoint
+	// up to one refresh early. Require the following output to be available too, so
+	// the shorter path cannot simply borrow a refresh from an immediate repeat.
+	if (s->cfg.prefer_real_60 && s->cfg.multiplier == 2 && cand.ok &&
+	    cand.show == KFG_SHOW_GEN && after_gen && cand.src_b == s->last_gen_pair) {
+		const kfg_source_slot *end = kfg_sched_find(s, cand.src_b);
+		if (end && end->t * Q > p && end->t * Q - p <= Q &&
+		    kfg_sched_eval_pos(s, (end->t + 1) * Q, k + 1).ok) {
+			p = end->t * Q;
+			cand = kfg_sched_eval_pos(s, p, k);
+			extra = 0;
+			s->catchup = 0;
+			s->ahead_streak = 0;
+			s->realign_k = k;
+			d.skipped = true;
+			s->n_skip++;
+		}
+	}
+
 	// Latency give-back: after a long streak in which one more vblank of content was also
 	// ready, the display owes one vblank less; it is taken back by the catch-up above.
 	if (cand.ok) {
@@ -640,6 +664,7 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 			d.phase_num = cand.num;
 			d.phase_den = cand.den;
 			if (cand.show == KFG_SHOW_GEN) {
+				s->last_was_generated = true;
 				s->last_gen_pair = cand.src_b;
 				s->last_gen_phase_num = cand.num;
 				s->last_gen_phase_den = cand.den;
