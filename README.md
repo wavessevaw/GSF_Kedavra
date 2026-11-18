@@ -10,9 +10,9 @@
 
 GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Gamescope, the compositor that already owns every vblank and every page flip in SteamOS Gaming Mode. A Decky plugin installs it, switches it on and off and measures the result. Since 1.3.1 it also targets the **Steam Machine** on a TV (60 or 120 Hz, games at 1080p or 4K).
 
-[**Download 1.6.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
+[**Download 1.7.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
 
-[![Release](https://img.shields.io/badge/release-1.6.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.6.0)
+[![Release](https://img.shields.io/badge/release-1.7.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0)
 [![Steam Deck](https://img.shields.io/badge/Steam%20Deck-OLED-0d1210?style=flat-square)](https://www.steamdeck.com/)
 [![Steam Machine](https://img.shields.io/badge/Steam%20Machine-TV%2060%2F120%20Hz-0d1210?style=flat-square)](#steam-machine)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-plugin-0d1210?style=flat-square)](https://decky.xyz/)
@@ -35,6 +35,7 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 - **The system image stays untouched.** The KEDAVRA Gamescope lives in `/var/lib/kedavra` and is mounted over the stock one only while the service runs. A boot that does not reach Gaming Mode returns to the stock Gamescope on the next boot.
 - **Frame pacing comes first.** A vblank-indexed scheduler decides what every refresh shows, and the game is held on a fixed cadence that generation can fill evenly.
 - **No FPS limit to set by hand.** In **Auto** the engine caps the game itself and picks the cap from the median of what the game really delivers (30, 35, 40 or 45 at 90 Hz, so x3 to x2, and 24 for x3.75 if you allow it). Or set your own base FPS with one slider.
+- **1.7.0:** Auto uses 30→60 on 60 Hz displays. The scheduler can advance a ready real endpoint on consecutive interpolation slots.
 - **Kedavra Focus (1.6.0).** Optional adaptive edge enhancement for SDR images, with a single on/off control.
 - **Honest numbers.** The ring counts new frames on screen and the game's own frames, and the pacing record is taken from KMS page-flip timestamps, not from an FPS counter.
 
@@ -42,7 +43,7 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 
 Requires [Decky Loader](https://decky.xyz/). Tested on SteamOS 3.8.
 
-1. Download [**GSF-Kedavra-1.6.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.6.0/GSF-Kedavra-1.6.0.zip).
+1. Download [**GSF-Kedavra-1.7.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.7.0/GSF-Kedavra-1.7.0.zip).
 2. In Decky: **Settings → Developer → Install plugin from zip**, pick the file. Upgrading over an older KEDAVRA plugin keeps your settings.
 3. Open the plugin, go to **Setup** and press **Reinstall Gamescope KEDAVRA**. Reboot when asked.
 4. After the reboot every check in **Setup** is green, with no line saying the installed Gamescope differs from the one in the plugin.
@@ -88,7 +89,7 @@ Press **Setup → Save report to Desktop** when you report a problem: it saves o
 
 Since 1.3.1 the same zip installs on a Steam Machine (SteamOS Gaming Mode with Decky Loader), the same way as on the Deck. **Not yet run on a Steam Machine:** everything below comes from software tests.
 
-- **Multipliers for a TV.** Auto never goes above ×3, and ×2 to ×2.5 is the sweet spot. At 60 Hz the game is held at 30 and doubled; **Allow ×2.5** lets it drop to 24 in heavy scenes. At 120 Hz the cap runs from 40 (×3) to 60 (×2). ×4 at 120 Hz is not recommended: it is off and only switched on in **Setup → Allow ×4 in Auto**.
+- **TV at 60 Hz.** Auto targets 30 FPS ×2. At 120 Hz Auto can use 40–60 FPS, with an optional lower floor in Setup.
 - **Resolution costs little.** Motion is analysed at no more than 1536×960 pixels (1.44× the Deck's screen); a 1080p or 4K game is analysed scaled down, and only the final frame is built at full resolution. A pair of game frames costs 1.37× the Deck's work at 1080p and 1.74× at 4K (lavapipe), on a GPU several times faster than the Deck's.
 - **VRR.** Generated frames need a fixed refresh, so adaptive sync (FreeSync) is paused while Auto or Custom is selected. **Off** gives it back.
 - **HUD** keeps its share of the screen on a 1080p or 4K TV.
