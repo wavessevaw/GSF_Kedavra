@@ -78,6 +78,7 @@ enum kfg_state {
 
 typedef struct kfg_sched_config {
 	uint32_t multiplier;        // 1 = off, 2 = x2, 3 = x3
+	bool prefer_real_90;        // fixed 90 Hz, 30 FPS cap, third consecutive phase only
 	bool prefer_real_60;        // enable only at fixed 60 Hz with a 30 FPS base
 	uint32_t catchup_streak;    // stable vblanks required before giving latency back
 	uint32_t max_delay;         // vblanks; larger delay resynchronises to the newest source
@@ -128,7 +129,8 @@ typedef struct kfg_sched {
 	uint32_t last_gen_phase_num;
 	uint32_t ahead_streak;
 	int64_t wall_ref;       // established k - content of the steady cadence; -1 unknown
-	bool last_was_generated;
+	int64_t response90_resume; // allow two seconds for pacing to settle after irregular input
+	unsigned consecutive_gen; // consecutive generated outputs from the same source pair
 	int64_t realign_k;      // vblank of the last realignment
 	enum kfg_state state;
 	bool want_on;
@@ -149,6 +151,7 @@ static inline kfg_sched_config kfg_sched_default_config(uint32_t multiplier)
 	kfg_sched_config c;
 	c.multiplier = multiplier;
 	c.prefer_real_60 = false;
+	c.prefer_real_90 = false;
 	c.catchup_streak = 90;   // 1 s at 90 Hz
 	c.max_delay = 12;
 	c.me_lag_budget = 2;  // analysis is split over two vblanks after the latch
@@ -199,7 +202,9 @@ static inline void kfg_sched_reset_history(kfg_sched *s)
 	s->count = 0;
 	s->head = 0;
 	s->ahead_streak = 0;
+	s->response90_resume = 0;
 	s->last_gen_pair = 0;
+	s->consecutive_gen = 0;
 	s->last_gen_phase_num = 0;
 	s->last_gen_phase_den = 0;
 	s->wall_ref = -1;
@@ -222,6 +227,8 @@ static inline bool kfg_sched_on_latch(kfg_sched *s, uint64_t id, int64_t vbl)
 	const uint32_t n = s->cfg.multiplier;
 	if (newest && n > 1) {
 		const int64_t iv = vbl - newest->latch;
+		if (iv < 3 || iv > 4)
+			s->response90_resume = vbl + 180;
 		if (iv <= 4 * (int64_t)n) {
 			// Mean over about 8 frames; long gaps (pause, loading) are not cadence.
 			if (s->interval_avg16 == 0)
@@ -448,11 +455,25 @@ static inline int64_t kfg_sched_lookahead(const kfg_sched *s, int64_t k, int64_t
 	return best;
 }
 
+// Only shorten a 90 Hz pair while recent 30 FPS input has a regular 3/4-refresh
+// cadence. A burst or hitch needs the existing Silk pacing margin.
+static inline bool kfg_sched_regular_90(const kfg_sched *s)
+{
+	if (s->count < 8 || kfg_sched_slot(s, 0)->latch < s->response90_resume)
+		return false;
+	for (uint32_t i = 1; i < 8; ++i) {
+		int64_t gap = kfg_sched_slot(s, i - 1)->latch - kfg_sched_slot(s, i)->latch;
+		if (gap < 3 || gap > 4)
+			return false;
+	}
+	return true;
+}
+
 // Decide the output for vblank k (strictly increasing between calls).
 static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 {
-	const bool after_gen = s->last_was_generated;
-	s->last_was_generated = false;
+	const unsigned prior_gen = s->consecutive_gen;
+	s->consecutive_gen = 0;
 	kfg_decision d;
 	memset(&d, 0, sizeof(d));
 	const kfg_source_slot *newest = kfg_sched_slot(s, 0);
@@ -586,11 +607,13 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 		cand = kfg_sched_eval_pos(s, p, k);
 	}
 
-	// When a pair has already supplied one intermediate, take its ready real endpoint
+	// When a pair has supplied its normal intermediates, take its ready real endpoint
 	// up to one refresh early. Require the following output to be available too, so
 	// the shorter path cannot simply borrow a refresh from an immediate repeat.
-	if (s->cfg.prefer_real_60 && s->cfg.multiplier == 2 && cand.ok &&
-	    cand.show == KFG_SHOW_GEN && after_gen && cand.src_b == s->last_gen_pair) {
+	const bool prefer_endpoint = (s->cfg.prefer_real_60 && s->cfg.multiplier == 2 && prior_gen >= 1) ||
+	                             (s->cfg.prefer_real_90 && s->cfg.multiplier == 3 && prior_gen >= 2 && kfg_sched_regular_90(s));
+	if (prefer_endpoint && cand.ok &&
+	    cand.show == KFG_SHOW_GEN && cand.src_b == s->last_gen_pair) {
 		const kfg_source_slot *end = kfg_sched_find(s, cand.src_b);
 		if (end && end->t * Q > p && end->t * Q - p <= Q &&
 		    kfg_sched_eval_pos(s, (end->t + 1) * Q, k + 1).ok) {
@@ -664,7 +687,7 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 			d.phase_num = cand.num;
 			d.phase_den = cand.den;
 			if (cand.show == KFG_SHOW_GEN) {
-				s->last_was_generated = true;
+				s->consecutive_gen = cand.src_b == s->last_gen_pair ? prior_gen + 1 : 1;
 				s->last_gen_pair = cand.src_b;
 				s->last_gen_phase_num = cand.num;
 				s->last_gen_phase_den = cand.den;

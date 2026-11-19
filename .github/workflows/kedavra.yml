@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -21,6 +21,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
+      - name: Verify early real frame and irregular input fallback
+        run: cc -Wall -Wextra -Werror kedavra/sched/test_response90.c -o /tmp/test-response90 && /tmp/test-response90
       - name: HUD input unit test
         run: g++ -std=c++17 -pthread -Ikedavra/gamescope/src/kfg kedavra/tools/test_hud_input.cpp -o /tmp/hud-input-test && /tmp/hud-input-test
       - name: Build
@@ -241,3 +243,33 @@ jobs:
             detail-results
             validation.log
             hard-engine.json
+
+  gfg-response-test:
+    if: github.ref == 'refs/heads/test/90hz-response-2'
+    needs: [model-and-engine, gamescope, runtime-on-older-glibc]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: wavessevaw/GFG-Extreme
+          ref: 4f6e19fb03d83828c4a2c03097608a96dd0e4c93
+      - uses: actions/download-artifact@v4
+        with:
+          name: gamescope-runtime
+          path: runtime-build
+      - uses: actions/download-artifact@v4
+        with:
+          name: kedavra-deck-bench
+          path: bench-build
+      - name: Package and verify the complete GFG test plugin
+        run: |
+          test "$(cat runtime-build/VERSION)" = "kedavra-1.7.0-${GITHUB_SHA::7}"
+          bash scripts/build_release.sh 3.5.0-response90.2 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
+          cd out
+          sha256sum -c SHA256SUMS.txt
+          unzip -tq *.zip
+          cmp <(unzip -p *.zip GFG-Extreme/runtime/bin/gamescope) ../runtime-build/bin/gamescope
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GFG-Extreme-response90-test
+          path: out/
