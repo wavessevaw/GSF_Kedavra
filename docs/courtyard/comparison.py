@@ -9,6 +9,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("baseline", type=Path)
 parser.add_argument("candidate", type=Path)
 parser.add_argument("output", type=Path)
+parser.add_argument("--left", default="GFG 3.5.0 / Response90")
+parser.add_argument("--right", default="Courtyard candidate")
 args = parser.parse_args()
 times = [0, 33, 61, 108, 143, 199, 230, 272]
 fps, slowdown = 60, 8
@@ -22,8 +24,8 @@ with subprocess.Popen(cmd, stdin=subprocess.PIPE) as encoder:
             draw = ImageDraw.Draw(frame)
             name = f"h_courtyard_x3_f{i}_t{phase}"
             for col, (path, suffix, label) in enumerate([
-                (args.baseline, "gen", "GFG 3.5.0 / Response90"),
-                (args.candidate, "gen", "Courtyard candidate"),
+                (args.baseline, "gen", args.left),
+                (args.candidate, "gen", args.right),
                 (args.candidate, "truth", "3D reference")]):
                 with Image.open(path / f"{name}_{suffix}.ppm") as image:
                     frame.paste(image.resize((640, 400), Image.Resampling.LANCZOS), (640 * col, 32))

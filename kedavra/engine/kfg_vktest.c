@@ -368,12 +368,23 @@ static void hlines(const scene *s, double t, double x, double y, int w, int h, d
 // Coordinates are in metres. Only final RGB is submitted to the interpolation engine.
 static const int courtyard_ms[] = {0, 33, 61, 108, 143, 199, 230, 272};
 
+static const int reversal_ms[] = {0, 42, 68, 119, 151, 190, 247, 277};
+
+static const int *source_times(const scene *s)
+{
+	return s->vx == 0 ? reversal_ms : courtyard_ms;
+}
+
 static void courtyard(double time, double direction, double x, double y, int w, int h, double rgb[3])
 {
 	if (crosshair(x, y, w, h, rgb))
 		return;
 	double yaw = direction * 0.38 * sin(time * 2.7);
 	double cx = direction * 2.2 * time, cy = 1.55;
+	if (direction == 0) {
+		yaw = 0.14 * sin(14.0*time);
+		cx = 0.16 - 1.7*time;
+	}
 	double u = (x - w * 0.5) / (w * 0.7), dy = (h * 0.5 - y) / (w * 0.7) - 0.08;
 	double dx = u * cos(yaw) + sin(yaw), dz = cos(yaw) - u * sin(yaw);
 	double hit = 13.0 / dz;
@@ -566,7 +577,7 @@ static void render(const scene *s, double t, int w, int h, uint8_t *out)
 	// The camera sequence keeps its frame count and moves faster instead (camera_pos).
 	if (s->kind == S_COURTYARD) {
 		// Source intervals in ms. Interpolate physical time for the exact phase reference.
-		const int *ms = courtyard_ms;
+		const int *ms = source_times(s);
 		int a = (int)floor(t);
 		if (a < 0) a = 0;
 		if (a > 6) a = 6;
@@ -1052,6 +1063,7 @@ static double bad_blocks(const uint8_t *g, const uint8_t *t, int w, int h)
 }
 
 static const scene HARD[] = {
+	{ "h_courtyard_reversal", S_COURTYARD, 0, 0, true, false },
 	{ "h_courtyard_reverse", S_COURTYARD, -1, 0, true, false },
 	{ "h_courtyard", S_COURTYARD, 1, 0, true, false },
 	{ "h_pan_ref", S_PAN, 24, 6, true, false },  // the old pan, for reference
@@ -1065,6 +1077,39 @@ static const scene HARD[] = {
 	{ "h_lines_slow", S_HLINES, 2.7, 0.9, true, false },
 	{ "h_lines_fast", S_HLINES, 24, 7, true, false },
 };
+
+// Fixed absolute threshold complements the neighboring-tile outlier score. Evaluate
+// all complete 4x4 tiles, including identical and flat ones, against the true phase.
+static double severe_tiles(const uint8_t *gen, const uint8_t *truth, int w, int h)
+{
+	unsigned severe = 0, tiles = 0;
+	for (int y = 0; y + 4 <= h; y += 4) {
+		for (int x = 0; x + 4 <= w; x += 4) {
+			double sum = 0;
+			for (int dy = 0; dy < 4; ++dy)
+				for (int dx = 0; dx < 4; ++dx) {
+					size_t i = ((size_t)(y + dy) * w + x + dx) * 4;
+					sum += fabs(0.299 * (gen[i] - truth[i]) +
+					            0.587 * (gen[i+1] - truth[i+1]) +
+					            0.114 * (gen[i+2] - truth[i+2]));
+				}
+			severe += sum > 16.0 * 48.0;
+			++tiles;
+		}
+	}
+	return tiles ? 100.0 * severe / tiles : 0;
+}
+
+static void log_dispatch_times(engine *e, const kfg_plan *plan)
+{
+	double times[KFG_MAX_PASSES];
+	uint32_t n = kfg_vk_pass_times(e->vk, times, KFG_MAX_PASSES);
+	if (n != plan->n) return;
+	double total_ns = 0;
+	for (uint32_t i = 0; i < n; ++i)
+		total_ns += times[i];
+	printf("dispatch %s %.4f ms\n", plan->pass[0].label, total_ns * 1e-6);
+}
 
 // Every scene as a running sequence of 8 frames through the ring (temporal seeds on), shown as
 // the real frame and the generated phases of x3 (and x2). Per scene and mode:
@@ -1096,6 +1141,9 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 			double ps = 0, worst = 1e9, eg = 0, bk = 0, bb = 0, bbmax = 0, te = 0, lf = 0, sf = 0, rprev = -1;
 			int n_ps = 0, n_te = 0, n_lf = 0;
 			bool have_prev = false;
+			unsigned hold = 0;
+			const bool timing = getenv("KFG_COURTYARD_TIMING") != NULL;
+			double severe_sum = 0, severe_max = 0;
 			for (int f = 0; f < frames; f++) {
 				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
 				render(s, (double)f, w, h, B);
@@ -1103,12 +1151,16 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				kfg_plan p;
 				kfg_tuning pair_tune = *tune;
 				if (s->kind == S_COURTYARD && f >= 2) {
-					uint64_t prev = (courtyard_ms[f-1] - courtyard_ms[f-2]) * 1000000ull;
-					uint64_t cur = (courtyard_ms[f] - courtyard_ms[f-1]) * 1000000ull;
+					const int *ms = source_times(s);
+					uint64_t prev = (ms[f-1] - ms[f-2]) * 1000000ull;
+					uint64_t cur = (ms[f] - ms[f-1]) * 1000000ull;
 					pair_tune.variable_interval = kfg_variable_interval(prev, cur);
+					hold = kfg_response_hold(prev, cur, hold);
+					pair_tune.interval_ratio = hold ? (float)cur / (float)prev : 0.0f;
 				}
 				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, &pair_tune);
 				run_plan(e, &p, NULL, NULL);
+				if (timing && f > 0) log_dispatch_times(e, &p);
 				if (f == 0)
 					continue;
 				if (getenv("KFG_HARD_FIELD") && (s->kind == S_HTURN || s->kind == S_HTURN_DARK) && mode == 3) {
@@ -1199,9 +1251,13 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					if (j == 0) {
 						render(s, f - 1, w, h, O);
 					} else {
-						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, 0);
+						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, hold ? KFG_FLAG_VARIABLE_INTERVAL : 0);
 						run_plan(e, &p, NULL, NULL);
+						if (timing) log_dispatch_times(e, &p);
 						kfg_vk_download_rgba8(vk, &e->output, O);
+						double severe = severe_tiles(O, T, w, h);
+						severe_sum += severe;
+						severe_max = fmax(severe_max, severe);
 						const double pg = psnr_region(O, T, w, h, 0, 0, w, h);
 						float st[16];
 						if (getenv("KFG_HARD_VERBOSE"))
@@ -1281,8 +1337,8 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				tot_n++;
 			}
 			if (js)
-				fprintf(js, "%s  {\"scene\": \"%s\", \"mode\": %d, \"psnr\": %.3f, \"psnr_worst\": %.3f, \"errgrad\": %.4f, \"blk\": %.5f, \"badblk_pct\": %.4f, \"badblk_max\": %.4f, \"temporal\": %.4f, \"lineflk\": %.4f, \"sharpflk_pct\": %.3f}",
-					first ? "" : ",\n", s->name, mode, ps / n_ps, worst, eg / n_ps, bk / n_ps, bb / n_ps, bbmax, te / n_te, n_lf ? lf / n_lf : 0.0, 100.0 * sf / n_te);
+				fprintf(js, "%s  {\"scene\": \"%s\", \"mode\": %d, \"psnr\": %.3f, \"psnr_worst\": %.3f, \"errgrad\": %.4f, \"blk\": %.5f, \"severe4_pct\": %.5f, \"severe4_max\": %.5f, \"badblk_pct\": %.4f, \"badblk_max\": %.4f, \"temporal\": %.4f, \"lineflk\": %.4f, \"sharpflk_pct\": %.3f}",
+					first ? "" : ",\n", s->name, mode, ps / n_ps, worst, eg / n_ps, bk / n_ps, severe_sum / n_ps, severe_max, bb / n_ps, bbmax, te / n_te, n_lf ? lf / n_lf : 0.0, 100.0 * sf / n_te);
 			first = false;
 		}
 	}

@@ -47,6 +47,31 @@ float line_error(vec2 pa, vec2 pb, vec2 d, ivec2 size)
 	return e * (1.0 / 3.0);
 }
 
+
+vec4 sourceFlow(vec2 position, ivec2 grid)
+{
+	return texelFetch(s_samplers[4], clamp(ivec2(floor(position*0.25)),ivec2(0),grid-1),0);
+}
+
+
+// A sharp edge fixed in display coordinates can be smaller than one flow block.
+// Require two separately matching colors before overriding the moving field.
+bool stableEdge(ivec2 p, ivec2 size, out vec3 center)
+{
+	center = texelFetch(s_samplers[0], p, 0).rgb;
+	vec3 next = texelFetch(s_samplers[1], p, 0).rgb;
+	if (any(greaterThan(abs(next-center), vec3(1.1/255.0)))) return false;
+	const ivec2 stepDir[4] = ivec2[4](ivec2(2,0),ivec2(-2,0),ivec2(0,2),ivec2(0,-2));
+	for (int i=0;i<4;i++) {
+		ivec2 q = clamp(p + stepDir[i], ivec2(0), size-1);
+		vec3 neighbor = texelFetch(s_samplers[0],q,0).rgb;
+		if (dot(abs(center-neighbor),vec3(0.3333)) < 0.12) continue;
+		vec3 check = texelFetch(s_samplers[1],q,0).rgb;
+		if (all(lessThanEqual(abs(neighbor-check),vec3(1.1/255.0)))) return true;
+	}
+	return false;
+}
+
 void main()
 {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
@@ -63,6 +88,11 @@ void main()
 	}
 	// The field and its vectors are in analysis pixels: the source's own up to the Deck's
 	// pixel count, scaled down above it (u_scale source pixels per analysis pixel).
+	vec3 stationary;
+	if ((u_flags & (KFG_FLAG_VARIABLE_INTERVAL | KFG_FLAG_DEBUG_MARKER)) == KFG_FLAG_VARIABLE_INTERVAL && stableEdge(p, size, stationary)) {
+		imageStore(dst,p,vec4(stationary,1.0));
+		return;
+	}
 	const vec2 sc = u_scale;
 	ivec2 bsize = (u_srcSize + 3) / 4;
 	// Bilinear footprint over the block field; use it only where the four vectors agree.
@@ -156,6 +186,42 @@ void main()
 			}
 		}
 	}
+
+	if ((u_flags & KFG_FLAG_VARIABLE_INTERVAL) != 0 && pair && !still && spread2 > 16.0) {
+		// Re-evaluate only a motion boundary. Project the current solution into
+		// each real endpoint and recover competing velocities from those surfaces.
+		vec2 q = (vec2(p) + 0.5) / sc;
+		vec2 initial = sel.xy;
+		vec2 candidates[3] = vec2[3](initial, sourceFlow(q - u_t * initial, bsize).xy,
+		                            -sourceFlow(q + (1.0 - u_t) * initial, bsize).zw);
+		float best = 1e5;
+		bool disputed = length(candidates[1] - initial) > 1.5 || length(candidates[2] - initial) > 1.5;
+		for (int i = 0; disputed && i < 3; i++) {
+			vec2 motion = candidates[i];
+			if (i > 0 && dot(motion - initial, motion - initial) < 0.25)
+				continue;
+			vec2 qa = q - u_t * motion, qb = q + (1.0 - u_t) * motion;
+			vec4 fa = sourceFlow(qa, bsize), fb = sourceFlow(qb, bsize);
+			float ea = length(fa.xy - motion), eb = length(fb.zw + motion);
+			vec3 ca = kfg_tap(0, qa * sc - 0.5, size).rgb;
+			vec3 cb = kfg_tap(1, qb * sc - 0.5, size).rgb;
+			float diff = dot(abs(ca - cb), vec3(0.3333));
+			float score = diff + 0.003 * min(10.0, min(ea, eb)) + 0.001 * min(16.0, max(ea, eb));
+			if (i == 0)
+				score -= 0.008;
+			if (score < best) {
+				best = score;
+				v = motion * sc;
+				pa = qa * sc - 0.5;
+				pb = qb * sc - 0.5;
+				if (i != 0) {
+					sel.z = 1.0 / (1.0 + exp(clamp((eb - ea) * 0.35, -16.0, 16.0)));
+					sel.w = diff;
+				}
+			}
+		}
+	}
+
 	// Out-of-frame samples: take the other side when only one is inside the image.
 	bool ina = all(greaterThanEqual(pa, vec2(0.0))) && all(lessThan(pa, vec2(size)));
 	bool inb = all(greaterThanEqual(pb, vec2(0.0))) && all(lessThan(pb, vec2(size)));

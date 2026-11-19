@@ -39,7 +39,7 @@ extern "C" {
 
 #define KFG_LEVELS 4      // luma levels 1..4
 #define KFG_RING 4        // frames / pairs kept so delayed outputs can still use their pair
-#define KFG_MAX_SLOTS 4
+#define KFG_MAX_SLOTS 5
 #define KFG_MAX_PASSES 16
 
 enum kfg_shader {
@@ -171,7 +171,18 @@ static inline int kfg_variable_interval(uint64_t prev, uint64_t cur)
 	       longer - shorter > shorter / 6;
 }
 
+// A short hold keeps adjacent pairs on one reconstruction path after a timing change.
+static inline unsigned kfg_response_hold(uint64_t prev, uint64_t cur, unsigned hold)
+{
+	if (prev < 12000000 || cur < 12000000 || prev > 100000000 || cur > 100000000)
+		return 0;
+	if (kfg_variable_interval(prev, cur))
+		return 3;
+	return hold ? hold - 1u : 0u;
+}
+
 typedef struct kfg_tuning {
+	float interval_ratio;
 	int variable_interval;
 	int32_t radius_coarsest;   // texels at level 4 (x16 pixels)
 	int32_t radius_refine;     // texels at levels 3 and 2
@@ -183,6 +194,7 @@ typedef struct kfg_tuning {
 static inline kfg_tuning kfg_default_tuning(void)
 {
 	kfg_tuning t;
+	t.interval_ratio = 0;
 	t.variable_interval = 0;
 	t.radius_coarsest = 6;  // +-96 pixels per source frame before refinement
 	t.radius_refine = 1;
@@ -363,6 +375,11 @@ static inline void kfg_plan_analyze(kfg_plan *p, uint32_t w, uint32_t h, uint32_
 		x->params.src_size[1] = (int32_t)sz[l][1];
 		x->params.full_size[0] = (int32_t)w;
 		x->params.full_size[1] = (int32_t)h;
+		if (prev_pair >= 0 && tune->interval_ratio > 0) {
+			x->slots[4] = kfg_ref(KFG_ROLE_FLOW, (uint32_t)prev_pair, l);
+			x->nslots = 5;
+			x->params.t = tune->interval_ratio;
+		}
 		x->params.level = (int32_t)l;
 		x->params.radius = l == KFG_LEVELS ? tune->radius_coarsest : tune->radius_refine;
 		x->params.flags = l == KFG_LEVELS ? KFG_FLAG_COARSEST | (temporal ? KFG_FLAG_TEMPORAL : 0) : 0;
@@ -424,6 +441,10 @@ static inline void kfg_plan_generate(kfg_plan *p, uint32_t w, uint32_t h, uint32
 	x->slots[2] = sel;
 	x->slots[3] = kfg_ref(KFG_ROLE_STATS, pr, 0);
 	x->nslots = 4;
+	if ((flags & KFG_FLAG_VARIABLE_INTERVAL) != 0) {
+		x->slots[4] = kfg_ref(KFG_ROLE_FLOW, pr, 2);
+		x->nslots = 5;
+	}
 	x->params.src_size[0] = (int32_t)asz[0];  // analysis size: the field is a quarter of it
 	x->params.src_size[1] = (int32_t)asz[1];
 	x->params.full_size[0] = (int32_t)w;

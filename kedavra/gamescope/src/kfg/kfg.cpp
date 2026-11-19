@@ -90,6 +90,7 @@ namespace kfg
 		uint64_t ulID = 0;
 		uint64_t ulLatchNs = 0;
 		uint64_t ulIntervalNs = 0;
+		unsigned uResponseHold = 0;
 		uint64_t ulPrevID = 0;      // the frame the pair analysis of this one used; 0 = none
 		bool bValid = false;
 		gamescope::OwningRc<CVulkanTexture> pColor;
@@ -1335,6 +1336,10 @@ namespace kfg
 			cur.ulIntervalNs = pPrev && cur.ulLatchNs > pPrev->ulLatchNs ? cur.ulLatchNs - pPrev->ulLatchNs : 0;
 			tune.variable_interval = pPrev && s.nTransfer == KFG_TRANSFER_SDR &&
 				kfg_variable_interval( pPrev->ulIntervalNs, cur.ulIntervalNs );
+			cur.uResponseHold = pPrev && s.nTransfer == KFG_TRANSFER_SDR
+				? kfg_response_hold( pPrev->ulIntervalNs, cur.ulIntervalNs, pPrev->uResponseHold ) : 0;
+			if ( cur.uResponseHold )
+				tune.interval_ratio = float( cur.ulIntervalNs ) / float( pPrev->ulIntervalNs );
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
 			cur.ulPrevID = pPrev ? pPrev->ulID : 0;
@@ -1370,7 +1375,7 @@ namespace kfg
 				{
 					kfg_plan_generate( &plan, s.uWidth, s.uHeight, FrameIndex( s, pA ), FrameIndex( s, pB ), FrameIndex( s, pB ),
 						float( d.phase_num ) / float( d.phase_den ),
-						kfg_transfer_flags( s.nTransfer ) | ( cv_kfg_debug_marker ? KFG_FLAG_DEBUG_MARKER : 0 ) );
+						kfg_transfer_flags( s.nTransfer ) | ( pB->uResponseHold ? KFG_FLAG_VARIABLE_INTERVAL : 0 ) | ( cv_kfg_debug_marker ? KFG_FLAG_DEBUG_MARKER : 0 ) );
 					RecordPlan( pCmd, plan, r );
 					pShow = s.pOutput[ s.uNextOutput ].get();
 					s.uNextOutput ^= 1u;

@@ -1,0 +1,47 @@
+{
+  "direct": {
+    "scene": "h_courtyard",
+    "mode": 3,
+    "psnr": 24.855,
+    "psnr_worst": 21.338,
+    "errgrad": 6.5731,
+    "blk": -0.015,
+    "badblk_pct": 11.4507,
+    "badblk_max": 12.6402,
+    "temporal": 7.1271,
+    "lineflk": 15.8076,
+    "sharpflk_pct": 7.164,
+    "severe4_pct": 1.4364955357142857,
+    "severe4_max": 3.6109375
+  },
+  "reverse": {
+    "scene": "h_courtyard_reverse",
+    "mode": 3,
+    "psnr": 24.854,
+    "psnr_worst": 20.573,
+    "errgrad": 6.4219,
+    "blk": -0.00414,
+    "badblk_pct": 11.1378,
+    "badblk_max": 12.0326,
+    "temporal": 7.1418,
+    "lineflk": 15.5497,
+    "sharpflk_pct": 7.609,
+    "severe4_pct": 1.5386160714285715,
+    "severe4_max": 4.625
+  },
+  "reversal": {
+    "scene": "h_courtyard_reversal",
+    "mode": 3,
+    "psnr": 20.349,
+    "psnr_worst": 16.903,
+    "errgrad": 9.8389,
+    "blk": 0.00636,
+    "badblk_pct": 13.0752,
+    "badblk_max": 16.7735,
+    "temporal": 14.7037,
+    "lineflk": 26.507,
+    "sharpflk_pct": 8.373,
+    "severe4_pct": 4.7828125,
+    "severe4_max": 10.682812499999999
+  }
+}
