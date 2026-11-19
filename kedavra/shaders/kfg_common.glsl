@@ -36,6 +36,7 @@ layout(binding = 0, scalar) uniform kfg_params_t {
 #define KFG_FLAG_REPAIR 64
 #define KFG_FLAG_PQ 128
 #define KFG_FLAG_SCRGB 256
+#define KFG_FLAG_VARIABLE_INTERVAL 2048
 #define KFG_FLAG_PAIR 512
 #define KFG_FLAG_RESAMPLE 1024
 

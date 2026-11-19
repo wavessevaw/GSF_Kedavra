@@ -21,6 +21,19 @@ float cost(vec2 c1, vec2 v)
 	// the edge and matches flat to flat on both sides no longer looks perfect. Sampled with
 	// 2 x 5 bilinear taps between texel centres instead of 21 point taps.
 	const float ys[5] = float[5](-3.0, -1.5, 0.0, 1.5, 3.0);
+	// During uneven source cadence a tall window can straddle foreground and background.
+	// Score two interleaved halves independently so one occluded side cannot veto a match.
+	if ((u_flags & KFG_FLAG_VARIABLE_INTERVAL) != 0) {
+		vec2 error = vec2(0.0);
+		for (int y = 0; y < 5; ++y) {
+			float width = (y % 2 == 0) ? 1.5 : 0.5;
+			for (int side = 0; side < 2; ++side) {
+				vec2 offset = vec2(side == 0 ? -width : width, ys[y] * 0.5);
+				error[side] += abs(kfg_tap(0, pa + offset, lsize).r - kfg_tap(1, pb + offset, lsize).r);
+			}
+		}
+		return 0.2 * mix(min(error.x, error.y), max(error.x, error.y), 0.1);
+	}
 	float e = 0.0;
 	for (int y = 0; y < 5; y++)
 		for (int x = 0; x < 2; x++) {

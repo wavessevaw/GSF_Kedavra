@@ -88,6 +88,8 @@ namespace kfg
 	struct Frame_t
 	{
 		uint64_t ulID = 0;
+		uint64_t ulLatchNs = 0;
+		uint64_t ulIntervalNs = 0;
 		uint64_t ulPrevID = 0;      // the frame the pair analysis of this one used; 0 = none
 		bool bValid = false;
 		gamescope::OwningRc<CVulkanTexture> pColor;
@@ -1329,6 +1331,10 @@ namespace kfg
 			// frame instead of once per displayed frame (x3.75: a quarter as often).
 			if ( !s.bPostPending || kfg_post_after_generation( &s.post ) || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
 				RecordCopy( pCmd, layer0.tex, cur.pColor.get() );
+			cur.ulLatchNs = s.ulLastSourceNs;
+			cur.ulIntervalNs = pPrev && cur.ulLatchNs > pPrev->ulLatchNs ? cur.ulLatchNs - pPrev->ulLatchNs : 0;
+			tune.variable_interval = pPrev && s.nTransfer == KFG_TRANSFER_SDR &&
+				kfg_variable_interval( pPrev->ulIntervalNs, cur.ulIntervalNs );
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
 			cur.ulPrevID = pPrev ? pPrev->ulID : 0;

@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN, S_HTURN, S_HPAR, S_HLINES, S_HTURN_DARK };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN, S_HTURN, S_HPAR, S_HLINES, S_HTURN_DARK, S_COURTYARD };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -364,9 +364,47 @@ static void hlines(const scene *s, double t, double x, double y, int w, int h, d
 	}
 }
 
+// Perspective rays hit the back wall, ground, moving sphere and foreground grille.
+// Coordinates are in metres. Only final RGB is submitted to the interpolation engine.
+static const int courtyard_ms[] = {0, 33, 61, 108, 143, 199, 230, 272};
+
+static void courtyard(double time, double direction, double x, double y, int w, int h, double rgb[3])
+{
+	if (crosshair(x, y, w, h, rgb))
+		return;
+	double yaw = direction * 0.38 * sin(time * 2.7);
+	double cx = direction * 2.2 * time, cy = 1.55;
+	double u = (x - w * 0.5) / (w * 0.7), dy = (h * 0.5 - y) / (w * 0.7) - 0.08;
+	double dx = u * cos(yaw) + sin(yaw), dz = cos(yaw) - u * sin(yaw);
+	double hit = 13.0 / dz;
+	background((cx + hit * dx) * 96, (cy + hit * dy) * 96, 81, rgb);
+	if (dy < 0 && -cy / dy < hit) {
+		hit = -cy / dy;
+		background((cx + hit * dx) * 50, hit * dz * 50, 82, rgb);
+	}
+	double ox = cx - (1.4 - time * 2.4), oy = cy - 1.0;
+	double a = dx*dx + dy*dy + dz*dz, b = ox*dx + oy*dy - 5.2*dz;
+	double disc = b*b - a*(ox*ox + oy*oy + 5.2*5.2 - 1.0);
+	if (disc > 0) {
+		double t = (-b - sqrt(disc)) / a;
+		if (t > 0 && t < hit) {
+			hit = t;
+			double light = 0.45 + 0.30*(oy+t*dy) - 0.20*(ox+t*dx);
+			rgb[0] = light; rgb[1] = light*0.5; rgb[2] = light*0.24;
+		}
+	}
+	double fence = 2.7 / dz;
+	double fx = cx + dx*fence, fy = cy + dy*fence;
+	if (fence < hit && fy > 0 && fy < 2.0 &&
+	    (fabs(remainder(fx, 0.47)) < 0.026 || fabs(fy - 1.1) < 0.016)) {
+		rgb[0] = 0.085; rgb[1] = 0.13; rgb[2] = 0.16;
+	}
+}
+
 static void scene_pixel(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
 {
 	switch (s->kind) {
+	case S_COURTYARD: courtyard(t, s->vx, x, y, w, h, rgb); return;
 	case S_HTURN:
 		hturn(s, t, x, y, rgb);
 		return;
@@ -526,7 +564,14 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 static void render(const scene *s, double t, int w, int h, uint8_t *out)
 {
 	// The camera sequence keeps its frame count and moves faster instead (camera_pos).
-	if (s->kind != S_CAMERA)
+	if (s->kind == S_COURTYARD) {
+		// Source intervals in ms. Interpolate physical time for the exact phase reference.
+		const int *ms = courtyard_ms;
+		int a = (int)floor(t);
+		if (a < 0) a = 0;
+		if (a > 6) a = 6;
+		t = (ms[a] + (t-a)*(ms[a+1]-ms[a])) * 0.001;
+	} else if (s->kind != S_CAMERA)
 		t *= g_timescale;
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++) {
@@ -1007,6 +1052,8 @@ static double bad_blocks(const uint8_t *g, const uint8_t *t, int w, int h)
 }
 
 static const scene HARD[] = {
+	{ "h_courtyard_reverse", S_COURTYARD, -1, 0, true, false },
+	{ "h_courtyard", S_COURTYARD, 1, 0, true, false },
 	{ "h_pan_ref", S_PAN, 24, 6, true, false },  // the old pan, for reference
 	{ "h_turn24", S_HTURN, 24, 0.06, true, false },
 	{ "h_turn32", S_HTURN, 32, 0.10, true, false },
@@ -1054,7 +1101,13 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				render(s, (double)f, w, h, B);
 				kfg_vk_upload_rgba8(vk, &e->color[fb], B);
 				kfg_plan p;
-				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, tune);
+				kfg_tuning pair_tune = *tune;
+				if (s->kind == S_COURTYARD && f >= 2) {
+					uint64_t prev = (courtyard_ms[f-1] - courtyard_ms[f-2]) * 1000000ull;
+					uint64_t cur = (courtyard_ms[f] - courtyard_ms[f-1]) * 1000000ull;
+					pair_tune.variable_interval = kfg_variable_interval(prev, cur);
+				}
+				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, &pair_tune);
 				run_plan(e, &p, NULL, NULL);
 				if (f == 0)
 					continue;
@@ -1176,7 +1229,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					// Optional full real/intermediate sequence for post-filter comparisons.
 					// This only saves existing output; it changes no engine input or dispatch.
 					if (getenv("KFG_DETAIL_SEQUENCE_OUT") &&
-					    (!strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
+					    (s->kind == S_COURTYARD || !strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
 						char name[128];
 						snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_gen", s->name, mode, f, j);
 						write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, O, w, h);

@@ -132,6 +132,7 @@ typedef struct kfg_params {
 #define KFG_FLAG_PAIR 512      // select: mid-phase field for the whole pair (z = side ratio, no lean);
                                // warp: project the pair's field to the output phase
 #define KFG_FLAG_RESAMPLE 1024 // reduce (from colour): any ratio down to the analysis level 1
+#define KFG_FLAG_VARIABLE_INTERVAL 2048
 #define KFG_REPAIR_ROUNDS 2    // select -> repair -> repair
 
 // Testing only (kfg_vktest A/B): select and repair for every output phase, as up to 1.2.
@@ -161,7 +162,17 @@ typedef struct kfg_plan {
 	uint32_t n;
 } kfg_plan;
 
+// Intervals are sampled when Gamescope latches a new real game frame.
+static inline int kfg_variable_interval(uint64_t prev, uint64_t cur)
+{
+	uint64_t longer = prev > cur ? prev : cur;
+	uint64_t shorter = prev > cur ? cur : prev;
+	return shorter >= 12000000 && longer >= 30000000 && longer <= 100000000 &&
+	       longer - shorter > shorter / 6;
+}
+
 typedef struct kfg_tuning {
+	int variable_interval;
 	int32_t radius_coarsest;   // texels at level 4 (x16 pixels)
 	int32_t radius_refine;     // texels at levels 3 and 2
 	float lambda;
@@ -172,6 +183,7 @@ typedef struct kfg_tuning {
 static inline kfg_tuning kfg_default_tuning(void)
 {
 	kfg_tuning t;
+	t.variable_interval = 0;
 	t.radius_coarsest = 6;  // +-96 pixels per source frame before refinement
 	t.radius_refine = 1;
 	t.lambda = 0.02f;
@@ -385,7 +397,7 @@ static inline void kfg_plan_analyze(kfg_plan *p, uint32_t w, uint32_t h, uint32_
 	x->groups[0] = 1;
 	x->groups[1] = 1;
 	if (!kfg_per_phase_select)
-		kfg_plan_selection(p, w, h, fa, fb, pr, 0.5f, KFG_FLAG_PAIR, kfg_ref(KFG_ROLE_PAIR_SELECT, pr, 0));
+		kfg_plan_selection(p, w, h, fa, fb, pr, 0.5f, KFG_FLAG_PAIR | (tune->variable_interval ? KFG_FLAG_VARIABLE_INTERVAL : 0), kfg_ref(KFG_ROLE_PAIR_SELECT, pr, 0));
 }
 
 // One generated output at phase t in (0, 1) between frames fa and fb of pair pr: a single

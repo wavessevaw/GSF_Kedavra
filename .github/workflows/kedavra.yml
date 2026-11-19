@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -29,6 +29,12 @@ jobs:
         run: make -C kedavra all detail-lab
       - name: Scheduler unit tests and model stress matrix
         run: make -C kedavra test-pacing test-sched
+      - name: Exercise both courtyard routes
+        run: |
+          for scene in h_courtyard h_courtyard_reverse; do
+            KFG_HARD_X2=1 kedavra/build/kfg_vktest --spv kedavra/build --hard --size 320x200 --scene "$scene" --json "$scene.json"
+            jq -e '.hard | length == 2' "$scene.json"
+          done
       - name: Engine correctness on lavapipe
         run: |
           export VK_ICD_FILENAMES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
@@ -181,6 +187,7 @@ jobs:
             README-Detail-Candidate.md
 
   detail-lab:
+    if: github.ref != 'refs/heads/test/courtyard-1'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -245,7 +252,7 @@ jobs:
             hard-engine.json
 
   gfg-response-test:
-    if: github.ref == 'refs/heads/test/90hz-response-2'
+    if: github.ref == 'refs/heads/test/courtyard-1'
     needs: [model-and-engine, gamescope, runtime-on-older-glibc]
     runs-on: ubuntu-24.04
     steps:
@@ -264,12 +271,12 @@ jobs:
       - name: Package and verify the complete GFG test plugin
         run: |
           test "$(cat runtime-build/VERSION)" = "kedavra-1.7.0-${GITHUB_SHA::7}"
-          bash scripts/build_release.sh 3.5.0-response90.2 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
+          bash scripts/build_release.sh 3.5.0-courtyard.1 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
           cd out
           sha256sum -c SHA256SUMS.txt
           unzip -tq *.zip
           cmp <(unzip -p *.zip GFG-Extreme/runtime/bin/gamescope) ../runtime-build/bin/gamescope
       - uses: actions/upload-artifact@v4
         with:
-          name: GFG-Extreme-response90-test
+          name: GFG-Extreme-courtyard-test
           path: out/
