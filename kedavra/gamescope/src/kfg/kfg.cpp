@@ -1281,6 +1281,8 @@ namespace kfg
 
 		s.sched.cfg.prefer_real_60 = ulRefreshCycleNs >= 16500000 && ulRefreshCycleNs <= 16800000 &&
 			!pFrameInfo->allowVRR && s.uMultiplier == 2 && SourceCapFPS( 60 ) == 30;
+		s.sched.cfg.prefer_real_90 = ulRefreshCycleNs >= 11050000 && ulRefreshCycleNs <= 11175000 &&
+			!pFrameInfo->allowVRR && s.uMultiplier == 3 && SourceCapFPS( 90 ) == 30;
 		s.pending = kfg_sched_decide( &s.sched, nVBlank );
 		s.ulPendingID = ulBaseCommitID;
 		s.nPendingVBlank = nVBlank;
