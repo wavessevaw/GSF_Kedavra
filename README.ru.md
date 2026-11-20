@@ -10,9 +10,9 @@
 
 GSF (GPU Synthetic Frames) создаёт промежуточные кадры внутри пропатченного Gamescope, то есть в том композиторе, который в игровом режиме SteamOS и так управляет каждым vblank и каждым переключением кадра. Плагин Decky устанавливает его, включает, выключает и измеряет результат. С 1.3.1 он рассчитан и на **Steam Machine** с телевизором (60 или 120 Гц, игры в 1080p или 4K).
 
-[**Скачать 1.7.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0) · [Установка](#установка) · [Режимы](#режимы) · [Измерение темпа](#измерение-темпа) · [Как это работает](#как-это-работает)
+[**Скачать 1.8.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.8.0) · [Установка](#установка) · [Режимы](#режимы) · [Измерение темпа](#измерение-темпа) · [Как это работает](#как-это-работает)
 
-[![Release](https://img.shields.io/badge/release-1.7.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0)
+[![Release](https://img.shields.io/badge/release-1.8.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.8.0)
 [![Steam Deck](https://img.shields.io/badge/Steam%20Deck-OLED-0d1210?style=flat-square)](https://www.steamdeck.com/)
 [![Steam Machine](https://img.shields.io/badge/Steam%20Machine-TV%2060%2F120%20Hz-0d1210?style=flat-square)](#steam-machine)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-plugin-0d1210?style=flat-square)](https://decky.xyz/)
@@ -25,7 +25,12 @@ GSF (GPU Synthetic Frames) создаёт промежуточные кадры 
 
 </div>
 
-> **Статус: экспериментально.** Движок, планировщик и плагин проходят программные тесты в CI, сборка работает на Steam Deck OLED.
+## Что нового в 1.8.0
+
+- При развороте камеры движок учитывает изменения скорости и реальные интервалы между кадрами. Это уменьшает квадратные искажения при нестабильном исходном FPS.
+- Kedavra Focus в SDR подчёркивает мягкие тёмные штрихи, швы и пряди. Работает при включённой и выключенной генерации. [Сравнительные изображения и видео](https://github.com/wavessevaw/GFG-Extreme/tree/53c40ff8bb422b1671d8dcce1ec0a116beeeb381/docs/focus-dark-detail)
+- Усилена защита неподвижных элементов HUD. На 90 Гц планировщик учитывает сбои исходного ритма кадров. Сохранён автоматический режим 30→60 ×2 на 60 Гц.
+
 
 ## Почему GSF Kedavra
 
@@ -43,7 +48,7 @@ GSF (GPU Synthetic Frames) создаёт промежуточные кадры 
 
 Нужен [Decky Loader](https://decky.xyz/). Проверено на SteamOS 3.8. Интерфейс плагина на английском, ниже названия кнопок даны как в плагине.
 
-1. Скачайте [**GSF-Kedavra-1.7.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.7.0/GSF-Kedavra-1.7.0.zip).
+1. Скачайте [**GSF-Kedavra-1.8.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.8.0/GSF-Kedavra-1.8.0.zip).
 2. В Decky: **Настройки → Разработчик → Установить плагин из zip**, выберите файл. Установка поверх старого плагина KEDAVRA сохраняет настройки.
 3. Откройте плагин, раздел **Setup**, нажмите **Reinstall Gamescope KEDAVRA**. Перезагрузите Deck, когда плагин попросит.
 4. После перезагрузки все проверки в разделе **Setup** зелёные и нет строки о том, что установленный Gamescope отличается от того, что в плагине.

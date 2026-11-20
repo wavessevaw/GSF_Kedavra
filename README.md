@@ -10,9 +10,9 @@
 
 GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Gamescope, the compositor that already owns every vblank and every page flip in SteamOS Gaming Mode. A Decky plugin installs it, switches it on and off and measures the result. Since 1.3.1 it also targets the **Steam Machine** on a TV (60 or 120 Hz, games at 1080p or 4K).
 
-[**Download 1.7.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
+[**Download 1.8.0**](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.8.0) · [Install](#installation) · [Modes](#modes) · [Measuring pacing](#measuring-pacing) · [How it works](#how-it-works)
 
-[![Release](https://img.shields.io/badge/release-1.7.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.7.0)
+[![Release](https://img.shields.io/badge/release-1.8.0-52d64a?style=flat-square)](https://github.com/wavessevaw/GSF_Kedavra/releases/tag/v1.8.0)
 [![Steam Deck](https://img.shields.io/badge/Steam%20Deck-OLED-0d1210?style=flat-square)](https://www.steamdeck.com/)
 [![Steam Machine](https://img.shields.io/badge/Steam%20Machine-TV%2060%2F120%20Hz-0d1210?style=flat-square)](#steam-machine)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-plugin-0d1210?style=flat-square)](https://decky.xyz/)
@@ -25,7 +25,12 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 
 </div>
 
-> **Status: experimental.** The engine, scheduler and plugin pass their software tests in CI, and the build runs on a Steam Deck OLED.
+## What’s new in 1.8.0
+
+- **Cleaner camera reversals.** The generator tracks changes in camera speed across real frames and uses their actual timestamps. In the 1280×800 Courtyard reversal test at ×3, blocks with large errors fell from 4.46% in Courtyard 3 to 3.44% in Courtyard 4. [Scene and measurements](https://github.com/wavessevaw/GFG-Extreme/tree/95398f2f795bbf08b8e8f1533af2e54d2c415e03/docs/courtyard4)
+- **More definition in dark detail.** Kedavra Focus deepens softened stitches, fur and fine dark lettering in SDR. Use **Setup → Kedavra Focus**, with frame generation on or off. [Images and motion comparisons](https://github.com/wavessevaw/GFG-Extreme/tree/53c40ff8bb422b1671d8dcce1ec0a116beeeb381/docs/focus-dark-detail)
+- **Steadier HUD and pacing.** The engine protects stationary HUD strokes on every SDR pair. At 90 Hz the scheduler checks the source cadence before advancing a ready real frame after a hitch. Automatic 30→60 ×2 continues to work at 60 Hz.
+
 
 ## Why GSF Kedavra
 
@@ -43,7 +48,7 @@ GSF (GPU Synthetic Frames) generates the in-between frames inside a patched Game
 
 Requires [Decky Loader](https://decky.xyz/). Tested on SteamOS 3.8.
 
-1. Download [**GSF-Kedavra-1.7.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.7.0/GSF-Kedavra-1.7.0.zip).
+1. Download [**GSF-Kedavra-1.8.0.zip**](https://github.com/wavessevaw/GSF_Kedavra/releases/download/v1.8.0/GSF-Kedavra-1.8.0.zip).
 2. In Decky: **Settings → Developer → Install plugin from zip**, pick the file. Upgrading over an older KEDAVRA plugin keeps your settings.
 3. Open the plugin, go to **Setup** and press **Reinstall Gamescope KEDAVRA**. Reboot when asked.
 4. After the reboot every check in **Setup** is green, with no line saying the installed Gamescope differs from the one in the plugin.
