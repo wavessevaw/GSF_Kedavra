@@ -370,9 +370,13 @@ static const int courtyard_ms[] = {0, 33, 61, 108, 143, 199, 230, 272};
 
 static const int reversal_ms[] = {0, 42, 68, 119, 151, 190, 247, 277};
 
+static bool g_play_backward, g_even_intervals;
+static enum { CAMERA_SINE, CAMERA_SNAP, CAMERA_STOP } g_camera_path;
+static const int regular_ms[] = {0, 33, 67, 100, 133, 167, 200, 233};
+
 static const int *source_times(const scene *s)
 {
-	return s->vx == 0 ? reversal_ms : courtyard_ms;
+	return g_even_intervals ? regular_ms : (s->vx == 0 ? reversal_ms : courtyard_ms);
 }
 
 static void courtyard(double time, double direction, double x, double y, int w, int h, double rgb[3])
@@ -384,6 +388,15 @@ static void courtyard(double time, double direction, double x, double y, int w, 
 	if (direction == 0) {
 		yaw = 0.14 * sin(14.0*time);
 		cx = 0.16 - 1.7*time;
+		// A change exactly at a real source frame: each segment has constant yaw rate.
+		if (g_camera_path == CAMERA_SNAP || g_camera_path == CAMERA_STOP) {
+			double pivot = (g_even_intervals ? regular_ms[3] : reversal_ms[3]) * 0.001;
+			yaw = 0.6 * (time <= pivot ? time : 2.0*pivot - time);
+			if (g_camera_path == CAMERA_STOP) {
+				yaw = 0.6 * fmin(time, pivot);
+				cx = 0.16;
+			}
+		}
 	}
 	double u = (x - w * 0.5) / (w * 0.7), dy = (h * 0.5 - y) / (w * 0.7) - 0.08;
 	double dx = u * cos(yaw) + sin(yaw), dz = cos(yaw) - u * sin(yaw);
@@ -781,7 +794,7 @@ static int engine_init(engine *e, kfg_vk *vk, uint32_t w, uint32_t h, VkFormat c
 			if (l >= 2 && kfg_vk_image_create(vk, &e->flow[r][l], kfg_vk_format(KFG_FORMAT_RGBA16F), sz[0], sz[1]))
 				return -1;
 		}
-		if (kfg_vk_image_create(vk, &e->stats[r], kfg_vk_format(KFG_FORMAT_RGBA16F), 4, 1))
+		if (kfg_vk_image_create(vk, &e->stats[r], kfg_vk_format(KFG_FORMAT_RGBA16F), KFG_STATS_WIDTH, 1))
 			return -1;
 	}
 	uint32_t bs[2];
@@ -940,7 +953,7 @@ static int hdr_checks(kfg_vk *vk, int w, int h, int transfer, FILE *js)
 		run_plan(&e, &p, NULL, NULL);
 		kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, -1, &tune);
 		run_plan(&e, &p, NULL, NULL);
-		float st[16];
+		float st[KFG_STATS_WIDTH * 4];
 		kfg_vk_download_rgba16f(vk, &e.stats[1], st);
 		bool ok = true;
 		const char *why = "";
@@ -1120,6 +1133,15 @@ static void log_dispatch_times(engine *e, const kfg_plan *plan)
 //             either frame): shimmer of thin straight lines;
 //   sharpflk: mean change of the high-frequency energy ratio output / truth from one shown
 //             frame to the next, % (sharp real / soft generated alternation).
+// Integer ticks give complementary phases identical reference times in both directions.
+static double sequence_time(const scene *s, int frame, int phase, int multiplier)
+{
+	int tick = frame * multiplier + phase;
+	if (s->kind == S_COURTYARD && g_play_backward)
+		tick = 7 * multiplier - tick;
+	return (double)tick / multiplier;
+}
+
 static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char *only, const kfg_tuning *tune)
 {
 	const size_t nbytes = (size_t)w * h * 4, npx = (size_t)w * h;
@@ -1146,14 +1168,23 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 			double severe_sum = 0, severe_max = 0;
 			for (int f = 0; f < frames; f++) {
 				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
-				render(s, (double)f, w, h, B);
+				render(s, sequence_time(s, f, 0, mode), w, h, B);
+				if (s->kind == S_COURTYARD && getenv("KFG_DETAIL_SEQUENCE_OUT")) {
+					char name[128];
+					snprintf(name, sizeof(name), "%s_source%d", s->name, f);
+					write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, B, w, h);
+				}
 				kfg_vk_upload_rgba8(vk, &e->color[fb], B);
 				kfg_plan p;
 				kfg_tuning pair_tune = *tune;
+				pair_tune.camera_ratio = f >= 2 ? 1.0f : 0.0f;
 				if (s->kind == S_COURTYARD && f >= 2) {
 					const int *ms = source_times(s);
-					uint64_t prev = (ms[f-1] - ms[f-2]) * 1000000ull;
-					uint64_t cur = (ms[f] - ms[f-1]) * 1000000ull;
+					int i = g_play_backward ? 7 - f : f;
+					int step = g_play_backward ? -1 : 1;
+					uint64_t prev = abs(ms[i-step] - ms[i-2*step]) * 1000000ull;
+					uint64_t cur = abs(ms[i] - ms[i-step]) * 1000000ull;
+					pair_tune.camera_ratio = kfg_camera_ratio(prev, cur);
 					pair_tune.variable_interval = kfg_variable_interval(prev, cur);
 					hold = kfg_response_hold(prev, cur, hold);
 					pair_tune.interval_ratio = hold ? (float)cur / (float)prev : 0.0f;
@@ -1247,9 +1278,9 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				}
 				for (int j = 0; j < mode; j++) {
 					const double t = (double)j / mode;
-					render(s, f - 1 + t, w, h, T);
+					render(s, sequence_time(s, f - 1, j, mode), w, h, T);
 					if (j == 0) {
-						render(s, f - 1, w, h, O);
+						memcpy(O, T, nbytes);
 					} else {
 						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, hold ? KFG_FLAG_VARIABLE_INTERVAL : 0);
 						run_plan(e, &p, NULL, NULL);
@@ -1259,7 +1290,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 						severe_sum += severe;
 						severe_max = fmax(severe_max, severe);
 						const double pg = psnr_region(O, T, w, h, 0, 0, w, h);
-						float st[16];
+						float st[KFG_STATS_WIDTH * 4];
 						if (getenv("KFG_HARD_VERBOSE"))
 							kfg_vk_download_rgba16f(vk, &e->stats[fb], st);
 						if (getenv("KFG_HARD_VERBOSE"))
@@ -1359,7 +1390,7 @@ static int ringing_checks(kfg_vk *vk)
 	if (engine_init(&e, vk, w, h, VK_FORMAT_R8G8B8A8_UNORM)) return 1;
 	uint8_t input[64 * 48 * 4], output[sizeof(input)];
 	_Float16 field[16 * 12 * 4];
-	uint16_t stats[16] = {0};
+	uint16_t stats[KFG_STATS_WIDTH * 4] = {0};
 	kfg_vk_upload_raw(vk, &e.stats[1], stats, sizeof(stats));
 	int violations = 0, max_overshoot = 0;
 	for (int axis = 0; axis < 2; axis++) {
@@ -1425,11 +1456,15 @@ int main(int argc, char **argv)
 			// displacement, not hardware cadence; hard-suite phases remain j/mode.
 			g_timescale = 30.0 / fps;
 		}
+		else if (!strcmp(argv[i], "--snap-courtyard")) g_camera_path = CAMERA_SNAP;
+		else if (!strcmp(argv[i], "--stop-courtyard")) g_camera_path = CAMERA_STOP;
+		else if (!strcmp(argv[i], "--reverse-courtyard")) g_play_backward = true;
+		else if (!strcmp(argv[i], "--regular-courtyard")) g_even_intervals = true;
 		else if (!strcmp(argv[i], "--per-phase")) kfg_per_phase_select = 1;  // 1.2 selection, for A/B
 		else if (!strcmp(argv[i], "--scaled")) g_geo = -1.0;  // set from --size below
 		else if (!strcmp(argv[i], "--analysis-pixels") && i + 1 < argc) kfg_analysis_pixels = (uint32_t)atoi(argv[++i]);  // 0 = full size
 		else {
-			fprintf(stderr, "usage: kfg_vktest [--spv DIR] [--size WxH] [--out DIR] [--json FILE] [--bench N] [--scene NAME] [--no-temporal] [--lowbase] [--source-fps FPS] [--per-phase] [--scaled] [--analysis-pixels N] [--hard]\n");
+			fprintf(stderr, "usage: kfg_vktest [--spv DIR] [--size WxH] [--out DIR] [--json FILE] [--bench N] [--scene NAME] [--no-temporal] [--lowbase] [--source-fps FPS] [--per-phase] [--scaled] [--analysis-pixels N] [--hard] [--reverse-courtyard] [--regular-courtyard] [--snap-courtyard|--stop-courtyard]\n");
 			return 2;
 		}
 	}
@@ -1489,7 +1524,7 @@ int main(int argc, char **argv)
 		run_plan(&e, &p, NULL, NULL);
 		kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, 0, 1, 1, 1, -1, &tune); // pair A(0)->B(1), pair ring 1
 		run_plan(&e, &p, NULL, NULL);
-		float st[16];  // stats is 4x1
+		float st[KFG_STATS_WIDTH * 4];
 		kfg_vk_download_rgba16f(&vk, &e.stats[1], st);
 		if (getenv("KFG_FLOWDUMP")) {
 			// Tuning aid: the most common forward vectors per level (pixels, rounded).
@@ -1710,7 +1745,7 @@ int main(int argc, char **argv)
 			run_plan(&e, &p, NULL, NULL);
 			if (f == 0)
 				continue;
-			float st[16];  // stats is 4x1
+			float st[KFG_STATS_WIDTH * 4];
 			kfg_vk_download_rgba16f(&vk, &e.stats[fb], st);
 			if (st[0] > 0.5)
 				cuts++;

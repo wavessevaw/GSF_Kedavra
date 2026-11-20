@@ -233,6 +233,21 @@ void main()
 		}
 	}
 
+	// On a turn, a camera-following surface can lie off the straight chord
+	// between its real positions. Leave independent motion and stationary UI alone.
+	if (pair && !still && (u_flags & (KFG_FLAG_PQ | KFG_FLAG_SCRGB)) == 0 && dot(sel.xy, sel.xy) > 1.0) {
+		vec2 curve = texelFetch(s_samplers[3], KFG_CURVE_TEXEL, 0).zw;
+		if (any(notEqual(curve, vec2(0.0)))) {
+			vec4 global = texelFetch(s_samplers[3], KFG_GLOBAL_TEXEL, 0);
+			vec2 camera = 0.5 * (global.xy - global.zw);
+			float agreement = 1.0 - smoothstep(3.0, 16.0, length(sel.xy - camera));
+			vec2 offset = (u_t * (1.0 - u_t)) * curve;
+			offset *= agreement * min(1.0, 6.0 / max(length(offset), 0.001));
+			pa += offset * sc;
+			pb += offset * sc;
+		}
+	}
+
 	// Out-of-frame samples: take the other side when only one is inside the image.
 	bool ina = all(greaterThanEqual(pa, vec2(0.0))) && all(lessThan(pa, vec2(size)));
 	bool inb = all(greaterThanEqual(pb, vec2(0.0))) && all(lessThan(pb, vec2(size)));

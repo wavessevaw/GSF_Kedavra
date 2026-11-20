@@ -108,10 +108,11 @@ void repair(ivec2 p, vec2 c1)
 			best = vec4(v, nb[i].z, c);
 		}
 	}
-	if (best.xy != nb[4].xy)
-		best.z = mix(best.z, u_t < 0.5 ? 0.0 : 1.0, smoothstep(0.10, 0.20, best.w));
-	else
+	if (best.xy == nb[4].xy)
 		best = nb[4];
+	else if ((u_flags & KFG_FLAG_PAIR) == 0)
+		// A shared pair stores visibility. Only a phase-specific field can prefer the nearer source.
+		best.z = mix(best.z, u_t < 0.5 ? 0.0 : 1.0, smoothstep(0.10, 0.20, best.w));
 	imageStore(dst, p, best);
 }
 

@@ -40,10 +40,11 @@ layout(binding = 0, scalar) uniform kfg_params_t {
 #define KFG_FLAG_PAIR 512
 #define KFG_FLAG_RESAMPLE 1024
 
-// Pair statistics image (4x1): texel 0 = cut and match statistics; texels 1 to 3 = camera
+// Pair statistics image (5x1): texel 0 = cut and match statistics; texels 1 to 3 = camera
 // motion as affine fields over normalised image coordinates: texel 1 = motion at the image
 // centre (xy forward, zw backward, pixels), texels 2 and 3 = forward and backward gradients
 // (x: xy, y: zw, pixels per half image).
+#define KFG_CURVE_TEXEL ivec2(4, 0)
 #define KFG_GLOBAL_TEXEL ivec2(1, 0)
 
 float kfg_luma(vec3 c)

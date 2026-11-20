@@ -38,6 +38,7 @@ extern "C" {
 #endif
 
 #define KFG_LEVELS 4      // luma levels 1..4
+#define KFG_STATS_WIDTH 5
 #define KFG_RING 4        // frames / pairs kept so delayed outputs can still use their pair
 #define KFG_MAX_SLOTS 5
 #define KFG_MAX_PASSES 16
@@ -66,7 +67,7 @@ enum kfg_role {
 	KFG_ROLE_COLOR,     // source colour of a frame (host-owned, e.g. a compositor commit)
 	KFG_ROLE_LUMA,      // luma pyramid of a frame; level 1..4
 	KFG_ROLE_FLOW,      // bidirectional flow of a pair; level 2..4
-	KFG_ROLE_STATS,     // 4x1 pair statistics: texel 0 cut test, texels 1-3 camera motion (affine)
+	KFG_ROLE_STATS,     // cut test, camera motion (texels 1-3), camera curvature (texel 4)
 	KFG_ROLE_SELECT,    // selection field scratch (select and repair ping-pong)
 	KFG_ROLE_PAIR_SELECT, // a pair's selection field at mid-phase (ring-indexed like FLOW)
 	KFG_ROLE_OUTPUT,    // generated output (host-owned)
@@ -181,7 +182,17 @@ static inline unsigned kfg_response_hold(uint64_t prev, uint64_t cur, unsigned h
 	return hold ? hold - 1u : 0u;
 }
 
+// Adjacent intervals must describe continuous gameplay before reusing camera motion.
+static inline float kfg_camera_ratio(uint64_t prev, uint64_t cur)
+{
+	if (prev < 12000000 || cur < 12000000 || prev > 100000000 || cur > 100000000)
+		return 0.0f;
+	float ratio = (float)cur / (float)prev;
+	return ratio >= 0.45f && ratio <= 2.25f ? ratio : 0.0f;
+}
+
 typedef struct kfg_tuning {
+	float camera_ratio;
 	float interval_ratio;
 	int variable_interval;
 	int32_t radius_coarsest;   // texels at level 4 (x16 pixels)
@@ -194,6 +205,7 @@ typedef struct kfg_tuning {
 static inline kfg_tuning kfg_default_tuning(void)
 {
 	kfg_tuning t;
+	t.camera_ratio = 0;
 	t.interval_ratio = 0;
 	t.variable_interval = 0;
 	t.radius_coarsest = 6;  // +-96 pixels per source frame before refinement
@@ -395,7 +407,12 @@ static inline void kfg_plan_analyze(kfg_plan *p, uint32_t w, uint32_t h, uint32_
 			x->params.full_size[0] = (int32_t)w;
 			x->params.full_size[1] = (int32_t)h;
 			x->params.flags = KFG_FLAG_GLOBAL;
-			x->params.dst_size[0] = 4;
+			if (prev_pair >= 0 && tune->camera_ratio > 0.0f && tune->transfer == KFG_TRANSFER_SDR) {
+				x->slots[1] = kfg_ref(KFG_ROLE_STATS, (uint32_t)prev_pair, 0);
+				x->nslots = 2;
+				x->params.t = tune->camera_ratio;
+			}
+			x->params.dst_size[0] = KFG_STATS_WIDTH;
 			x->params.dst_size[1] = 1;
 			x->groups[0] = 1;
 			x->groups[1] = 1;

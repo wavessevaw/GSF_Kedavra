@@ -484,7 +484,7 @@ namespace kfg
 				if ( !f.pLuma[ l ] || ( l >= 2 && !f.pFlow[ l ] ) )
 					return false;
 			}
-			f.pStats = CreateImage( 4, 1, KFG_FORMAT_RGBA16F );  // cut test, camera motion
+			f.pStats = CreateImage( KFG_STATS_WIDTH, 1, KFG_FORMAT_RGBA16F );
 			if ( !f.pStats )
 				return false;
 		}
@@ -1339,6 +1339,7 @@ namespace kfg
 				RecordCopy( pCmd, layer0.tex, cur.pColor.get() );
 			cur.ulLatchNs = s.ulLastSourceNs;
 			cur.ulIntervalNs = pPrev && cur.ulLatchNs > pPrev->ulLatchNs ? cur.ulLatchNs - pPrev->ulLatchNs : 0;
+			tune.camera_ratio = pPrev && pPrev->ulPrevID ? kfg_camera_ratio( pPrev->ulIntervalNs, cur.ulIntervalNs ) : 0.0f;
 			tune.variable_interval = pPrev && s.nTransfer == KFG_TRANSFER_SDR &&
 				kfg_variable_interval( pPrev->ulIntervalNs, cur.ulIntervalNs );
 			cur.uResponseHold = pPrev && s.nTransfer == KFG_TRANSFER_SDR

@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2, test/courtyard-3]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2, test/courtyard-3, test/courtyard-4]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -17,10 +17,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Vulkan software device and shader tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools
+          sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers glslang-tools python3-numpy python3-pil
       - name: Verify early real frame and irregular input fallback
         run: cc -Wall -Wextra -Werror kedavra/sched/test_response90.c -o /tmp/test-response90 && /tmp/test-response90
       - name: HUD input unit test
@@ -36,6 +38,28 @@ jobs:
             KFG_DETAIL_SEQUENCE_OUT=hud-frames KFG_HARD_X2=1 kedavra/build/kfg_vktest --spv kedavra/build --hard --size 320x200 --scene "$scene" --json "$scene.json"
             python3 kedavra/tools/check_hud_sequence.py hud-frames "$scene" --max-error 12
             jq -e '.hard | length == 2' "$scene.json"
+          done
+      - name: Compare complementary phases on a continuous turn and an instantaneous reversal
+        if: github.ref == 'refs/heads/test/courtyard-4'
+        run: |
+          git fetch --depth=1 origin a253ec0c19a5134475935c8eebc04d2230a68ac3
+          mkdir /tmp/courtyard3
+          git archive a253ec0c19a5134475935c8eebc04d2230a68ac3 kedavra/shaders | tar -x -C /tmp/courtyard3
+          cp -r kedavra/build /tmp/baseline
+          for shader in kfg_stats kfg_select kfg_warp; do
+            glslangValidator -V --target-env vulkan1.1 -I/tmp/courtyard3/kedavra/shaders -o "/tmp/baseline/$shader.spv" "/tmp/courtyard3/kedavra/shaders/$shader.comp"
+          done
+          for control in turn snap; do
+            args=()
+            if [[ $control == snap ]]; then args+=(--control snap); fi
+            for variant in baseline candidate; do
+              spv=kedavra/build
+              if [[ $variant == baseline ]]; then spv=/tmp/baseline; fi
+              /usr/bin/python3 kedavra/tools/courtyard/phase_compare.py --exe kedavra/build/kfg_vktest --spv "$spv" --size 480x300 "${args[@]}" --out "$variant-$control.json"
+            done
+            checks=()
+            if [[ $control == snap ]]; then checks+=(--snap); fi
+            python3 kedavra/tools/courtyard/check_result.py "baseline-$control.json" "candidate-$control.json" "${checks[@]}"
           done
       - name: Engine correctness on lavapipe
         run: |

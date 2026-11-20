@@ -148,6 +148,24 @@ void main()
 			imageStore(dst, KFG_GLOBAL_TEXEL, vec4(cf, cb));
 			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(1, 0), mf);
 			imageStore(dst, KFG_GLOBAL_TEXEL + ivec2(2, 0), mb);
+			// Finite difference of consecutive interval-average velocities. The
+			// position correction at phase t is t(1-t) times the stored coefficient.
+			vec2 camera = 0.5 * (cf - cb);
+			vec2 rawChange = vec2(0.0);
+			vec2 curve = vec2(0.0);
+			if (u_t > 0.0 && texelFetch(s_samplers[1], ivec2(0), 0).x < 0.5) {
+				vec4 prev = texelFetch(s_samplers[1], KFG_GLOBAL_TEXEL, 0);
+				vec2 predicted = 0.5 * (prev.xy - prev.zw) * u_t;
+				vec2 delta = camera - predicted;
+				float agreement = 1.0 - smoothstep(3.0, 12.0, length(cf + cb) + u_t * length(prev.xy + prev.zw));
+				float change = length(delta) / max(4.0, max(length(camera), length(predicted)));
+				rawChange = delta * agreement;
+				vec2 last = texelFetch(s_samplers[1], KFG_CURVE_TEXEL, 0).xy;
+				float aligned = dot(last, rawChange) / max(1.0, length(last) * length(rawChange));
+				float consistent = smoothstep(0.25, 0.80, aligned) * smoothstep(1.5, 4.0, length(last));
+				curve = consistent * delta * (u_t / (1.0 + u_t)) * agreement * smoothstep(0.12, 0.35, change);
+			}
+			imageStore(dst, KFG_CURVE_TEXEL, vec4(rawChange, curve));
 		}
 		return;
 	}
