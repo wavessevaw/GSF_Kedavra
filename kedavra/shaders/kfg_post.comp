@@ -400,7 +400,7 @@ vec3 dls(float sharpen, float denoise)
 	return clamp(x + (acc - lx), 0.0, 1.0);
 }
 
-// Bounded CAS-derived edge enhancement, SDR only. Nine samples, one dispatch.
+// Bounded CAS-derived edge enhancement, SDR only. Nine local samples, two conditional flank samples, one dispatch.
 // CAS-derived per-channel correction with direction weighting, smooth protection
 // and a small bounded excursion. No history, external upscaler detection or extra pass.
 vec3 detail(float strength, vec3 e)
@@ -443,7 +443,35 @@ vec3 detail(float strength, vec3 e)
 	delta = clamp(delta,-budget,budget);
 	// Small bounded excursion, reduced at extrema/ringing, rather than zero-halo gating.
 	vec3 allowance = min(vec3(0.025),0.25*(mx-mn))*ringing*(1.0-0.8*sharp);
-	return clamp(e+delta,max(vec3(0),mn-allowance),min(vec3(1),mx+allowance));
+	vec3 base = clamp(e+delta,max(vec3(0),mn-allowance),min(vec3(1),mx+allowance));
+
+	// Look for a trough across a stroke, continuous along its tangent. A point
+	// or a broad shadow has no well-supported preferred curvature direction.
+	float xx = ld + lf - 2.0*le, yy = lb + lh - 2.0*le;
+	float xy = 0.25*(la + li - lc - lg);
+	float split = length(vec2(xx-yy, 2.0*xy));
+	float crossCurve = 0.5*(xx+yy+split);
+	float alongCurve = xx+yy-crossCurve;
+	float support = crossCurve - 1.4*abs(alongCurve);
+	if (support <= 0.002 || le < 0.025 || le > 0.82)
+		return base;
+
+	vec2 axis = xx >= yy ? vec2(crossCurve-yy,xy) : vec2(xy,crossCurve-xx);
+	vec2 normal = normalize(axis);
+	vec3 left = at(g_uv - 2.4*normal*g_rcp);
+	vec3 right = at(g_uv + 2.4*normal*g_rcp);
+	float dl = dot(left, LUMA709) - le, dr = dot(right, LUMA709) - le;
+	float depth = min(dl, dr);
+	float balance = depth / max(max(dl, dr), 1e-5);
+	float weight = smoothstep(0.002,0.035,support) * smoothstep(0.34,0.77,balance)
+	             * smoothstep(0.025,0.16,le) * (1.0-smoothstep(0.62,0.82,le));
+	// A crisp one-pixel stroke has already completed the transition at its
+	// immediate neighbours. A blurred stroke still rises towards both flanks.
+	weight *= 1.0-smoothstep(0.75,1.65,crossCurve/max(depth,1e-5));
+	float darken = strength * weight * clamp(0.34*depth,0.0,0.047);
+	vec3 channelDepth = max(min(left,right)-e,vec3(0));
+	vec3 ink = min(base * (darken / max(dot(base,LUMA709),1e-5)),channelDepth);
+	return max(base-ink,min(base,max(vec3(0),mn9-vec3(14.0/255.0))));
 }
 
 #ifdef KFG_POST_RESEARCH
