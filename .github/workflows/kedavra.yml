@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2, test/courtyard-3]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -31,8 +31,10 @@ jobs:
         run: make -C kedavra test-pacing test-sched
       - name: Exercise all courtyard routes
         run: |
-          for scene in h_courtyard h_courtyard_reverse h_courtyard_reversal; do
-            KFG_HARD_X2=1 kedavra/build/kfg_vktest --spv kedavra/build --hard --size 320x200 --scene "$scene" --json "$scene.json"
+          mkdir -p hud-frames
+          for scene in h_courtyard h_courtyard_reverse h_courtyard_reversal h_lines_slow; do
+            KFG_DETAIL_SEQUENCE_OUT=hud-frames KFG_HARD_X2=1 kedavra/build/kfg_vktest --spv kedavra/build --hard --size 320x200 --scene "$scene" --json "$scene.json"
+            python3 kedavra/tools/check_hud_sequence.py hud-frames "$scene" --max-error 12
             jq -e '.hard | length == 2' "$scene.json"
           done
       - name: Engine correctness on lavapipe
@@ -252,14 +254,14 @@ jobs:
             hard-engine.json
 
   gfg-response-test:
-    if: github.ref == 'refs/heads/test/courtyard-2'
+    if: github.ref == 'refs/heads/test/courtyard-3'
     needs: [model-and-engine, gamescope, runtime-on-older-glibc]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           repository: wavessevaw/GFG-Extreme
-          ref: 4f6e19fb03d83828c4a2c03097608a96dd0e4c93
+          ref: 10b0e63f6126e47c98bfa813c456f1f4019a5fc3
       - uses: actions/download-artifact@v4
         with:
           name: gamescope-runtime
@@ -270,13 +272,15 @@ jobs:
           path: bench-build
       - name: Package and verify the complete GFG test plugin
         run: |
+          python3 -m unittest discover -s tests
+          python3 -m sandbox.run
           test "$(cat runtime-build/VERSION)" = "kedavra-1.7.0-${GITHUB_SHA::7}"
-          bash scripts/build_release.sh 3.5.0-courtyard.2 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
+          bash scripts/build_release.sh 3.5.0-courtyard.3 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
           cd out
           sha256sum -c SHA256SUMS.txt
           unzip -tq *.zip
           cmp <(unzip -p *.zip GFG-Extreme/runtime/bin/gamescope) ../runtime-build/bin/gamescope
       - uses: actions/upload-artifact@v4
         with:
-          name: GFG-Extreme-Courtyard-2
+          name: GFG-Extreme-Courtyard-3
           path: out/

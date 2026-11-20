@@ -270,7 +270,6 @@ namespace kfg
 		}
 		if ( nMtime == h.nMtimeNs )
 			return;
-		h.nMtimeNs = nMtime;
 
 		FILE *f = fopen( sPath.c_str(), "rb" );
 		if ( !f )
@@ -281,6 +280,7 @@ namespace kfg
 		if ( bOk && ( hdr[ 2 ] == 0 || hdr[ 3 ] == 0 ) )
 		{
 			fclose( f );
+			h.nMtimeNs = nMtime;
 			h.bVisible = false;
 			return;
 		}
@@ -309,6 +309,7 @@ namespace kfg
 			h.uWidth = hdr[ 2 ];
 			h.uHeight = hdr[ 3 ];
 		}
+		h.nMtimeNs = nMtime;
 		h.pixels = std::move( px );
 		h.uInputMode = hdr[7] <= 3 ? hdr[7] : 0;
 		h.uCorner = hdr[ 4 ] <= 4u ? hdr[ 4 ] : 0u;
@@ -320,8 +321,11 @@ namespace kfg
 	static void HudPushLayer( FrameInfo_t *pFrameInfo )
 	{
 		Hud_t &h = g_Hud;
-		if ( !pFrameInfo->layers.count() )
+		if ( g_State.bSteamUI || !pFrameInfo->layers.count() )
+		{
+			hud_input::geometry( 0, 0, 0, 0, 0 );
 			return;
+		}
 		// Placed in output pixels, from the size of the composite target.
 		const FrameInfo_t::Layer_t &base = pFrameInfo->layers.get( 0 );
 		const float flOutW = base.tex ? float( base.tex->width() ) / base.scale.x : 1280.0f;
@@ -332,7 +336,7 @@ namespace kfg
 		}
 		const float flX = h.uCorner == 4u ? ( flOutW - h.uWidth ) * 0.5f : ( h.uCorner & 1u ) ? flOutW - float( h.uWidth + h.uMargin ) : float( h.uMargin );
 		const float flY = h.uCorner == 4u ? ( flOutH - h.uHeight ) * 0.5f : ( h.uCorner & 2u ) ? flOutH - float( h.uHeight + h.uMargin ) : float( h.uMargin );
-		hud_input::geometry(flX, flY, h.uWidth, h.uHeight, g_State.bSteamUI || !g_State.uPaintAppID ? 0 : h.uInputMode);
+		hud_input::geometry(flX, flY, h.uWidth, h.uHeight, g_State.uPaintAppID ? h.uInputMode : 0);
 
 		FrameInfo_t::Layer_t *layer = pFrameInfo->layers.push();
 		if ( !layer )
@@ -1091,7 +1095,8 @@ namespace kfg
 
 	bool WantsComposite()
 	{
-		return WantsEveryVBlank() || ( kfg_post_active( &g_State.post ) && !g_State.bSteamUI );
+		return WantsEveryVBlank() || ( !g_State.bSteamUI &&
+			( kfg_post_active( &g_State.post ) || ( g_Hud.bVisible && g_Hud.bUpload ) ) );
 	}
 
 	void OnPaint( FrameInfo_t *pFrameInfo, uint64_t ulBaseCommitID, uint32_t uAppID, uint64_t ulTargetVBlankNs, uint64_t ulRefreshCycleNs )
@@ -1114,7 +1119,6 @@ namespace kfg
 		StartTraceWriter();
 		WriteStatus( s, ulNow );
 		HudPoll( ulNow );
-		HudPushLayer( pFrameInfo );
 
 		// The game's own frame rate is counted whether generation is on or not: the HUD and
 		// the plugin must show what the game really delivers, not the display's flip rate
@@ -1133,6 +1137,7 @@ namespace kfg
 			if ( bSteamUI )
 				ResetHistory( s, "steam ui" );
 		}
+		HudPushLayer( pFrameInfo );
 		if ( bSteamUI ) {
 			if ( kfg_post_after_generation( &s.post ) ) s.pszFocusStatus = "steam_ui";
 			return;
