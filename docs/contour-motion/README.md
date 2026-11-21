@@ -1,0 +1,9 @@
+# Contour motion test candidate
+
+During a pan, a thin foreground grille can move at a different speed from the scene visible through it. Kedavra measures the normal displacement of narrow, consistent contours from both real SDR frames. Sparse scanlines vote for the displacement and luminance ranges. The warp restores a contour only where the endpoints agree on its colour, orientation and profile. It removes a misplaced copy only when it can find the corresponding stroke in the opposite real frame. Competing or unsupported contours fall back to the existing warp. Diagonal, deforming and transparent silhouettes remain difficult.
+
+The scene-cut check now reconsiders ambiguous scattered motion when motion compensation already explains most of the image difference. It requires matching textured landmarks across at least nine of sixteen screen regions. A confirmed cut continues to hold the older real frame. The stats texture grows by one RGBA16F texel per ring entry. The additional work uses the existing pair analysis and warp passes. No additional queued frame or control is needed.
+
+Install only the ZIP for your current Decky plugin. Reinstall the bundled Gamescope from Setup and restart your Steam Deck. Enable frame generation. To roll back, install your previous package (GFG Extreme 3.6.0 or standalone Kedavra 1.8.0), reinstall Gamescope from its Setup menu and restart.
+
+Test the same slow and fast pan past railings at 60 Hz ×2 and 90 Hz ×3. Compare on the same display, power limit and native cap. Also cross an opaque pillar, open a HUD, and trigger a real scene cut. Repeat the route with variable input below 30 FPS. Record missed presents, output frame time P95/P99, power and visible ghost trails for both packages. Desktop software Vulkan measurements do not establish handheld timing, energy use or game-specific quality.

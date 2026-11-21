@@ -58,6 +58,9 @@ static const scene SCENES[] = {
 	// from the stairs to unrelated texture.
 	{ "cut_to_flat", S_CUT_FLAT, 0, 0, false, true },
 	{ "cut_stairs", S_CUT_STAIRS, 0, 0, false, true },
+	{ "cut_brick_hud", S_CUT, 12, 72, false, true },
+	{ "cut_brick_alt", S_CUT, 34, 91, false, true },
+	{ "cut_brick_dim", S_CUT, 54, 127, false, true },
 	// A fast turn over a dim, low-contrast surface with per-frame grain (TAA noise, film grain):
 	// where the motion search has little to hold on to and block artifacts showed on the Deck.
 	{ "grain_turn", S_GRAIN, 38, 7, true, false },
@@ -563,7 +566,8 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 		background(x, y, 1, rgb);
 		return;
 	case S_CUT:
-		background(x, y, t < 0.5 ? 1 : 50, rgb);
+		if (s->vx && hud(x,y,w,h,rgb)) return;
+		background(x, y, t < 0.5 ? 1 + (int)s->vx : 50 + (int)s->vy, rgb);
 		return;
 	case S_ROTATE: {
 		const double a = -4.0 * 3.14159265358979 / 180.0 * t, cx = 640, cy = 400;
@@ -1146,6 +1150,8 @@ static const scene HARD[] = {
 	{ "h_turn96", S_HTURN, 96, 0.10, true, false },
 	{ "h_dark64", S_HTURN_DARK, 64, 0.12, true, false },
 	{ "h_parallax", S_HPAR, 30, 4, true, false },
+	{ "h_parallax_reverse", S_HPAR, -23, 5, true, false },
+	{ "h_parallax_vertical", S_HPAR, 3, 19, true, false },
 	{ "h_lines_slow", S_HLINES, 2.7, 0.9, true, false },
 	{ "h_lines_fast", S_HLINES, 24, 7, true, false },
 };
@@ -1345,7 +1351,21 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 						run_plan(e, &p, NULL, NULL);
 						if (timing) log_dispatch_times(e, &p);
 						kfg_vk_download_rgba8(vk, &e->output, O);
-						double severe = severe_tiles(O, T, w, h);
+						if (s->kind == S_HPAR && getenv("KFG_CONTOUR_METRICS")) {
+						// The rail is neutral and bright. Neither the hills nor foliage
+						// reaches this range in all channels. Exclude antialiased boundaries.
+						unsigned ghosts=0, missing=0, lit=0, background_px=0;
+						for (size_t i=0; i<nbytes; i+=4) {
+							int ref=T[i]<T[i+1]?T[i]:T[i+1];
+							ref=ref<T[i+2]?ref:T[i+2];
+							int gen=O[i]<O[i+1]?O[i]:O[i+1];
+							gen=gen<O[i+2]?gen:O[i+2];
+							if (ref<160) { ++background_px; ghosts+=gen>=195; }
+							if (ref>=215) { ++lit; missing+=gen<195; }
+						}
+						printf("rails %d %d %d %u %u %u %u\n",mode,j,f,ghosts,background_px,missing,lit);
+					}
+					double severe = severe_tiles(O, T, w, h);
 						severe_sum += severe;
 						severe_max = fmax(severe_max, severe);
 						const double pg = psnr_region(O, T, w, h, 0, 0, w, h);

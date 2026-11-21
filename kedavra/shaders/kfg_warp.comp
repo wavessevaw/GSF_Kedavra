@@ -191,6 +191,71 @@ vec3 revealSurface(ivec2 p, ivec2 size, vec2 motion, vec2 pa, vec2 pb, vec3 resu
 	return result;
 }
 
+// Sample the two sides of a thin structure in its own normal direction.
+vec3 contourTap(int side, vec2 p, ivec2 size)
+{
+	return side == 0 ? kfg_tap(0,p,size).rgb : kfg_tap(1,p,size).rgb;
+}
+float contourProfile(int side, vec2 p, vec2 axis, ivec2 size, vec3 center, out vec3 surround)
+{
+	vec3 left = contourTap(side,p-2.5*axis,size);
+	vec3 right = contourTap(side,p+2.5*axis,size);
+	surround = 0.5*(left + right);
+	float a = kfg_luma(center-left), b = kfg_luma(center-right);
+	return a*b > 0.0 ? sign(a)*min(abs(a),abs(b)) : 0.0;
+}
+bool contourTone(float mask, vec3 color)
+{
+	int k=clamp(int(kfg_luma(color)*8.0),0,7);
+	// Fractional sampling can move a line one bin towards its background.
+	return (int(mask) & ((7 << k) >> 1)) != 0;
+}
+
+vec3 contourLayer(ivec2 p, ivec2 size, vec2 motion, vec2 pa, vec2 pb, vec3 ca, vec3 cb, float wb, vec3 result)
+{
+	vec4 track = texelFetch(s_samplers[3],KFG_CONTOUR_TEXEL,0);
+	bvec2 activeAxis = greaterThanEqual(abs(track.xy),vec2(1.0));
+	if (!any(activeAxis) || all(lessThan(abs(track.xy-motion),vec2(1.0)))) return result;
+	vec2 v=motion;
+	for(int dim=0; dim<2; ++dim)
+		if(track[dim+2]>0.0) v[dim]=track[dim];
+	vec2 qa=vec2(p)-u_t*v, qb=vec2(p)+(1.0-u_t)*v;
+	if(!inside(qa,size) || !inside(qb,size)) return result;
+	for(int dim=0; dim<2; ++dim) {
+		if(track[dim+2]<=0.0 || abs(track[dim])<1.0 || abs(track[dim]-motion[dim])<1.0) continue;
+		vec2 axis=dim==0 ? vec2(1,0) : vec2(0,1);
+		vec3 a=contourTap(0,qa,size), b=contourTap(1,qb,size), sa,sb;
+		bool restore=contourTone(track[dim+2],a) && contourTone(track[dim+2],b);
+		bool fromA=wb<1.0 && contourTone(track[dim+2],ca);
+		bool fromB=wb>0.0 && contourTone(track[dim+2],cb);
+		if(!restore && !fromA && !fromB) continue;
+		float ha=contourProfile(0,qa,axis,size,a,sa), hb=contourProfile(1,qb,axis,size,b,sb);
+		if(restore && ha*hb>0.0 && min(abs(ha),abs(hb))>0.08 && colorDistance(a,b)<0.13 &&
+		   colorDistance(a,contourTap(0,qa+3.0*axis.yx,size))<0.09 &&
+		   colorDistance(b,contourTap(1,qb+3.0*axis.yx,size))<0.09)
+			return mix(a,b,u_t);
+		// A line from just one real frame can remain at the background's velocity.
+		// Remove its contribution only if the same line is present in the other
+		// frame at its separately measured position.
+		if(max(abs(ha),abs(hb))>0.08) continue;
+		for(int side=0;side<2;++side) {
+			float w=side==0 ? 1.0-wb : wb;
+			if(side==0 ? !fromA : !fromB) continue;
+			vec2 q=side==0 ? pa : pb;
+			vec2 mate=q+(side==0 ? v : -v);
+			if(!inside(mate,size)) continue;
+			vec3 c=contourTap(side,q,size), near, other;
+			float h=contourProfile(side,q,axis,size,c,near);
+			if(abs(h)<0.12) continue;
+			vec3 m=contourTap(1-side,mate,size);
+			if(colorDistance(m,c)>0.12 || h*contourProfile(1-side,mate,axis,size,m,other)<0.01 ||
+			   colorDistance(c,contourTap(side,q+3.0*axis.yx,size))>0.08) continue;
+			result=clamp(result-w*(c-near),0.0,1.0);
+		}
+	}
+	return result;
+}
+
 void main()
 {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
@@ -423,6 +488,8 @@ void main()
 	}
 	if (pair && !still && !marker && (u_flags & (KFG_FLAG_PQ | KFG_FLAG_SCRGB)) == 0)
 		c = revealSurface(p, size, v, pa, pb, c);
+	if (pair && !still && !marker && (u_flags & (KFG_FLAG_PQ | KFG_FLAG_SCRGB)) == 0)
+		c = contourLayer(p,size,v,pa,pb,ca.rgb,cb.rgb,w_b,c);
 	if (marker) {
 		// Optical-verification marker: brightness encodes the phase (camera tests only).
 		c = vec3(u_t);

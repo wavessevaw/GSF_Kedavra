@@ -38,7 +38,7 @@ extern "C" {
 #endif
 
 #define KFG_LEVELS 4      // luma levels 1..4
-#define KFG_STATS_WIDTH 5
+#define KFG_STATS_WIDTH 6
 #define KFG_RING 4        // frames / pairs kept so delayed outputs can still use their pair
 #define KFG_MAX_SLOTS 5
 #define KFG_MAX_PASSES 16
@@ -422,11 +422,14 @@ static inline void kfg_plan_analyze(kfg_plan *p, uint32_t w, uint32_t h, uint32_
 	x->slots[0] = kfg_ref(KFG_ROLE_LUMA, fa, 2);
 	x->slots[1] = kfg_ref(KFG_ROLE_LUMA, fb, 2);
 	x->slots[2] = kfg_ref(KFG_ROLE_FLOW, pr, 2);
-	x->nslots = 3;
+	x->slots[3] = kfg_ref(KFG_ROLE_COLOR, fa, 0);
+	x->slots[4] = kfg_ref(KFG_ROLE_COLOR, fb, 0);
+	x->nslots = 5;
+	x->params.flags = kfg_transfer_flags(tune->transfer);
 	x->params.src_size[0] = (int32_t)sz[2][0];
 	x->params.src_size[1] = (int32_t)sz[2][1];
 	x->params.cut_threshold = tune->cut_threshold;
-	x->params.dst_size[0] = 1;
+	x->params.dst_size[0] = KFG_STATS_WIDTH;
 	x->params.dst_size[1] = 1;
 	x->groups[0] = 1;
 	x->groups[1] = 1;
