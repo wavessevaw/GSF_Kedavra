@@ -76,6 +76,121 @@ bool stableEdge(ivec2 p, ivec2 size, out vec3 color)
 	return false;
 }
 
+// Reconstruct the trailing edge of an opaque, locally uniform surface.
+// Match real-frame colours only. No depth, material IDs or prior generated frame.
+vec3 endpoint(int side, ivec2 p, ivec2 size)
+{
+	p = clamp(p, ivec2(0), size - 1);
+	return side == 0 ? texelFetch(s_samplers[0], p, 0).rgb
+	                 : texelFetch(s_samplers[1], p, 0).rgb;
+}
+
+float colorDistance(vec3 a, vec3 b)
+{
+	vec3 d = abs(a - b);
+	return max(d.r, max(d.g, d.b));
+}
+
+bool inside(vec2 p, ivec2 size)
+{
+	return all(greaterThanEqual(p, vec2(0))) && all(lessThanEqual(p, vec2(size - 1)));
+}
+
+// Distances are signed by the caller. Require a bracketed crossing inside the
+// image. Skipping a very narrow strip can miss a correction but cannot make the
+// border sampler stand in for material beyond the image.
+float crossing(int side, ivec2 p, ivec2 dir, ivec2 size, vec3 surface,
+               float threshold, bool startsInside, int limit)
+{
+	int lo = 0, hi = 1;
+	float nearGap = startsInside ? 0.0 : colorDistance(endpoint(side, p, size), surface);
+	float farGap;
+	for (;;) {
+		ivec2 q = p + hi * dir;
+		if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, size)))
+			return -1.0;
+		farGap = colorDistance(endpoint(side, q, size), surface);
+		if ((farGap < threshold) != startsInside)
+			break;
+		if (hi == limit)
+			return -1.0;
+		lo = hi;
+		nearGap = farGap;
+		hi = min(2 * hi + 1, limit);
+	}
+	while (hi - lo > 1) {
+		int mid = (lo + hi) / 2;
+		float gap = colorDistance(endpoint(side, p + mid * dir, size), surface);
+		if ((gap < threshold) == startsInside) {
+			lo = mid;
+			nearGap = gap;
+		} else {
+			hi = mid;
+			farGap = gap;
+		}
+	}
+	return float(lo) + clamp((threshold - nearGap) / (farGap - nearGap), 0.0, 1.0);
+}
+
+vec3 revealSurface(ivec2 p, ivec2 size, vec2 motion, vec2 pa, vec2 pb, vec3 result)
+{
+	vec3 a = texelFetch(s_samplers[0], p, 0).rgb;
+	vec3 b = texelFetch(s_samplers[1], p, 0).rgb;
+	float contrast = colorDistance(a, b);
+	float da = colorDistance(result, a), db = colorDistance(result, b);
+	if (contrast < 0.09 || min(da, db) > 0.035)
+		return result;
+	int side = da < db ? 0 : 1; // Endpoint containing the potentially stale surface.
+	vec3 surface = side == 0 ? a : b;
+	float phase = side == 0 ? u_t : 1.0 - u_t;
+	vec2 camera = kfg_global_at(3, vec2(p) + 0.5).xy * u_scale;
+	vec2 orient = dot(camera, camera) > 4.0 ? camera : motion;
+	ivec2 axis = abs(orient.x) >= abs(orient.y) ? ivec2(1, 0) : ivec2(0, 1);
+	ivec2 tangent = 2 * axis.yx;
+	if (max(colorDistance(surface, endpoint(side, p + tangent, size)),
+	        colorDistance(surface, endpoint(side, p - tangent, size))) > 0.012)
+		return result;
+
+	float threshold = min(0.16, contrast * 0.5);
+	float cameraTravel = dot(vec2(axis), camera);
+	float maxTravel = max(16.0, 2.5 * max(abs(cameraTravel), abs(dot(vec2(axis), motion))));
+	int limit = int(clamp(ceil(maxTravel), 1.0, 127.0));
+	int direction = (dot(vec2(axis), orient) >= 0.0 ? 1 : -1) * (side == 0 ? 1 : -1);
+	for (int trial = 0; trial < 2; trial++) {
+		ivec2 dir = (trial == 0 ? direction : -direction) * axis;
+		float enter = crossing(1 - side, p, dir, size, surface, threshold, false, limit);
+		if (enter < 0.0)
+			continue;
+		ivec2 q = p + (int(ceil(enter)) + 2) * dir;
+		if (!inside(vec2(q + 3 * dir), size) ||
+		    max(colorDistance(endpoint(1 - side, q, size), surface),
+		        colorDistance(endpoint(1 - side, q + 3 * dir, size), surface)) > 0.02 ||
+		    colorDistance(endpoint(1 - side, q + tangent, size), surface) > 0.02)
+			continue;
+		float leave = crossing(side, p, -dir, size, surface, threshold, true, limit);
+		float travel = leave + enter;
+		if (leave < 0.0 || travel > maxTravel)
+			continue;
+
+		vec2 curve = u_t * (1.0 - u_t) * texelFetch(s_samplers[3], KFG_CURVE_TEXEL, 0).zw * u_scale;
+		curve *= min(1.0, 5.0 / max(length(curve), 0.001));
+		float distance = mix(leave, -enter, phase) + dot(curve, vec2(dir));
+		if (distance >= -0.25)
+			return result;
+		vec2 donor = vec2(p) + (1.0 - phase) * travel * vec2(dir) + curve;
+		if (!inside(donor, size))
+			return result;
+		vec3 exposed = side == 0 ? kfg_tap(1, pb, size).rgb : kfg_tap(0, pa, size).rgb;
+		if (colorDistance(exposed, surface) < threshold)
+			exposed = side == 0 ? kfg_tap(1, donor, size).rgb : kfg_tap(0, donor, size).rgb;
+		if (colorDistance(exposed, surface) < threshold)
+			return result;
+		float weight = smoothstep(0.25, 1.75, -distance) * (1.0 - smoothstep(0.008, 0.035, min(da, db)));
+		return mix(result, exposed, weight);
+	}
+	return result;
+}
+
 void main()
 {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
@@ -306,6 +421,8 @@ void main()
 		vec3 sb = w_b > 0.0 ? kfg_tap(1, pb - o, size).rgb + kfg_tap(1, pb + o, size).rgb : vec3(0.0);
 		c = (2.0 * c + 0.5 * mix(sa, sb, w_b)) * (1.0 / 3.0);
 	}
+	if (pair && !still && !marker && (u_flags & (KFG_FLAG_PQ | KFG_FLAG_SCRGB)) == 0)
+		c = revealSurface(p, size, v, pa, pb, c);
 	if (marker) {
 		// Optical-verification marker: brightness encodes the phase (camera tests only).
 		c = vec3(u_t);

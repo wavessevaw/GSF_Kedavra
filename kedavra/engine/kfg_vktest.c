@@ -32,7 +32,7 @@ typedef struct scene {
 	bool cut;
 } scene;
 
-enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN, S_HTURN, S_HPAR, S_HLINES, S_HTURN_DARK, S_COURTYARD };
+enum { S_PAN, S_OBJECTS, S_OCCLUSION, S_STATIC, S_CUT, S_FASTPAN, S_STAIRS, S_CAMERA, S_DOLLY, S_DOLLY_STAIRS, S_NEAR, S_CLIMB, S_ROTATE, S_LINES, S_CUT_FLAT, S_CUT_STAIRS, S_GRAIN, S_HTURN, S_HPAR, S_HLINES, S_HTURN_DARK, S_COURTYARD, S_PILLAR_CROSSING };
 
 static const scene SCENES[] = {
 	{ "pan", S_PAN, 24, 6, true, false },
@@ -374,6 +374,11 @@ static bool g_play_backward, g_even_intervals;
 static enum { CAMERA_SINE, CAMERA_SNAP, CAMERA_STOP } g_camera_path;
 static const int regular_ms[] = {0, 33, 67, 100, 133, 167, 200, 233};
 
+static bool physical_timestamps(const scene *s)
+{
+	return s->kind == S_COURTYARD || s->kind == S_PILLAR_CROSSING;
+}
+
 static const int *source_times(const scene *s)
 {
 	return g_even_intervals ? regular_ms : (s->vx == 0 ? reversal_ms : courtyard_ms);
@@ -425,10 +430,63 @@ static void courtyard(double time, double direction, double x, double y, int w, 
 	}
 }
 
+// Render a walking figure at z=4.4 m behind a near post at z=2.55 m.
+// The compositor only sees the two finished RGB images.
+static void actor_part(double dx, double dy, double dz, double ox, double oy,
+                       double oz, double rx, double ry, double rz,
+                       const double albedo[3], double *nearest, double rgb[3])
+{
+	double ax=dx/rx, ay=dy/ry, az=dz/rz, x=ox/rx, y=oy/ry, z=oz/rz;
+	double a=ax*ax+ay*ay+az*az, b=x*ax+y*ay+z*az;
+	double disc=b*b-a*(x*x+y*y+z*z-1.0);
+	if (disc <= 0.0) return;
+	double t=(-b-sqrt(disc))/a;
+	if (t <= 0.0 || t >= *nearest) return;
+	*nearest=t;
+	double light=0.76-0.15*(x+t*ax)+0.09*(y+t*ay)-0.10*(z+t*az);
+	for (int k=0;k<3;k++) rgb[k]=albedo[k]*light;
+}
+
+static void pillar_crossing(double t, double x, double y, int w, int h, double rgb[3])
+{
+	double yaw=0.12*sin(t*9.0), cx=0.18*t, cy=1.18;
+	double u=(x-w*0.5)/(w*0.73), dy=(h*0.5-y)/(w*0.73)-0.04;
+	double dx=u*cos(yaw)+sin(yaw), dz=cos(yaw)-u*sin(yaw);
+	double nearest=9.0/dz;
+	double wx=cx+dx*nearest, wy=cy+dy*nearest;
+	double shade=0.59+0.07*sin(wx*9.0+wy*2.0)+0.045*cos(wy*15.0);
+	if (fabs(remainder(wy,0.32))<0.019 ||
+	    fabs(remainder(wx+0.34*floor(wy/0.32),0.68))<0.016) shade-=0.17;
+	if (dy<0.0 && -cy/dy<nearest) {
+		nearest=-cy/dy;
+		shade=0.36+0.06*cos((cx+dx*nearest)*11.0)*cos(dz*nearest*11.0);
+	}
+	rgb[0]=shade*0.88; rgb[1]=shade; rgb[2]=shade*1.04;
+	double ox=cx-(0.52-4.0*t), stride=0.12*sin(19*t);
+	static const double coat[]={0.82,0.28,0.09}, skin[]={0.90,0.56,0.35};
+	static const double leg[]={0.34,0.16,0.10}, hair[]={0.28,0.13,0.07};
+	for (int side=-1;side<=1;side+=2) {
+		actor_part(dx,dy,dz,ox-side*(0.12+stride),cy-0.48,-4.40,0.11,0.48,0.13,leg,&nearest,rgb);
+		actor_part(dx,dy,dz,ox-side*(0.29-0.3*stride),cy-1.10,-4.36,0.09,0.32,0.10,coat,&nearest,rgb);
+	}
+	actor_part(dx,dy,dz,ox,cy-1.13,-4.40,0.26,0.45,0.18,coat,&nearest,rgb);
+	actor_part(dx,dy,dz,ox,cy-1.73,-4.39,0.15,0.20,0.15,skin,&nearest,rgb);
+	actor_part(dx,dy,dz,ox,cy-1.86,-4.40,0.15,0.11,0.16,hair,&nearest,rgb);
+	double post=2.55/dz;
+	if (post<nearest && fabs(cx+dx*post)<0.115 && cy+dy*post>0 && cy+dy*post<2.4) {
+		rgb[0]=39.0/255; rgb[1]=52.0/255; rgb[2]=63.0/255;
+	}
+}
+
 static void scene_pixel(const scene *s, double t, double x, double y, int w, int h, double rgb[3])
 {
 	switch (s->kind) {
-	case S_COURTYARD: courtyard(t, s->vx, x, y, w, h, rgb); return;
+	case S_PILLAR_CROSSING:
+		pillar_crossing(t, x, y, w, h, rgb);
+		return;
+	case S_COURTYARD:
+		courtyard(t, s->vx, x, y, w, h, rgb);
+		return;
 	case S_HTURN:
 		hturn(s, t, x, y, rgb);
 		return;
@@ -588,7 +646,7 @@ static void scene_pixel(const scene *s, double t, double x, double y, int w, int
 static void render(const scene *s, double t, int w, int h, uint8_t *out)
 {
 	// The camera sequence keeps its frame count and moves faster instead (camera_pos).
-	if (s->kind == S_COURTYARD) {
+	if (physical_timestamps(s)) {
 		// Source intervals in ms. Interpolate physical time for the exact phase reference.
 		const int *ms = source_times(s);
 		int a = (int)floor(t);
@@ -1076,6 +1134,7 @@ static double bad_blocks(const uint8_t *g, const uint8_t *t, int w, int h)
 }
 
 static const scene HARD[] = {
+	{ "h_pillar_crossing", S_PILLAR_CROSSING, 0, 0, true, false },
 	{ "h_courtyard_reversal", S_COURTYARD, 0, 0, true, false },
 	{ "h_courtyard_reverse", S_COURTYARD, -1, 0, true, false },
 	{ "h_courtyard", S_COURTYARD, 1, 0, true, false },
@@ -1137,7 +1196,7 @@ static void log_dispatch_times(engine *e, const kfg_plan *plan)
 static double sequence_time(const scene *s, int frame, int phase, int multiplier)
 {
 	int tick = frame * multiplier + phase;
-	if (s->kind == S_COURTYARD && g_play_backward)
+	if (physical_timestamps(s) && g_play_backward)
 		tick = 7 * multiplier - tick;
 	return (double)tick / multiplier;
 }
@@ -1169,7 +1228,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 			for (int f = 0; f < frames; f++) {
 				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
 				render(s, sequence_time(s, f, 0, mode), w, h, B);
-				if (s->kind == S_COURTYARD && getenv("KFG_DETAIL_SEQUENCE_OUT")) {
+				if (physical_timestamps(s) && getenv("KFG_DETAIL_SEQUENCE_OUT")) {
 					char name[128];
 					snprintf(name, sizeof(name), "%s_source%d", s->name, f);
 					write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, B, w, h);
@@ -1178,7 +1237,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 				kfg_plan p;
 				kfg_tuning pair_tune = *tune;
 				pair_tune.camera_ratio = f >= 2 ? 1.0f : 0.0f;
-				if (s->kind == S_COURTYARD && f >= 2) {
+				if (physical_timestamps(s) && f >= 2) {
 					const int *ms = source_times(s);
 					int i = g_play_backward ? 7 - f : f;
 					int step = g_play_backward ? -1 : 1;
@@ -1316,7 +1375,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					// Optional full real/intermediate sequence for post-filter comparisons.
 					// This only saves existing output; it changes no engine input or dispatch.
 					if (getenv("KFG_DETAIL_SEQUENCE_OUT") &&
-					    (s->kind == S_COURTYARD || !strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
+					    (physical_timestamps(s) || !strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
 						char name[128];
 						snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_gen", s->name, mode, f, j);
 						write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, O, w, h);
