@@ -1,17 +1,46 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copies a compositor commit (slot 0, sampled through its non-sRGB view) into a
-// KEDAVRA ring texture. A compute copy works for imported dmabufs that lack
-// TRANSFER_SRC usage and converts BGRA/RGBA layouts to the ring format.
+// Copy the imported game image into the ring, preserving its stored colour encoding.
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "kfg_common.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
+vec3 cameraExposure(ivec2 p, vec3 center)
+{
+	if (u_t <= 0.0 || texelFetch(s_samplers[2], ivec2(0), 0).x > 0.5)
+		return center;
+	vec4 global = texelFetch(s_samplers[2], KFG_GLOBAL_TEXEL, 0);
+	vec2 motion = 0.5 * (global.xy - global.zw) * u_t;
+	float speed = length(motion);
+	if (speed <= 10.0 || length(global.xy + global.zw) > 2.0 + 0.2 * speed)
+		return center;
+	vec2 v = motion * u_scale;
+	vec2 prev = vec2(p) - v;
+	if (any(lessThan(prev, vec2(0))) || any(greaterThan(prev, vec2(u_dstSize - 1))))
+		return center;
+	// A pan has to explain the current pixel better than leaving it still.
+	// History only tests the hypothesis; all three output taps come from this commit.
+	vec3 previousCenter = texelFetch(s_samplers[1], p, 0).rgb;
+	float zeroError = dot(abs(center - previousCenter), vec3(1.0 / 3.0));
+	if (zeroError <= 0.012)
+		return center;
+	vec3 projected = kfg_tap(1, prev, u_dstSize).rgb;
+	float error = dot(abs(center - projected), vec3(1.0 / 3.0));
+	float support = smoothstep(0.005, 0.045, zeroError - error) * (1.0 - smoothstep(0.045, 0.14, error));
+	if (support == 0.0)
+		return center;
+	vec2 offset = (v / speed) * min(2.0, 0.045 * speed);
+	vec3 sides = 0.5 * (kfg_tap(0, vec2(p) - offset, u_dstSize).rgb +
+	                     kfg_tap(0, vec2(p) + offset, u_dstSize).rgb);
+	return mix(center, sides, 0.10 * smoothstep(10.0, 32.0, speed) * support);
+}
+
 void main()
 {
 	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(p, u_dstSize)))
 		return;
-	imageStore(dst, p, texelFetch(s_samplers[0], p, 0));
+	vec4 color = texelFetch(s_samplers[0], p, 0);
+	imageStore(dst, p, vec4(cameraExposure(p, color.rgb), color.a));
 }

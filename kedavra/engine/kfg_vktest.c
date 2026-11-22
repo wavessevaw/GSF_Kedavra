@@ -1142,6 +1142,7 @@ static const scene HARD[] = {
 	{ "h_courtyard_reversal", S_COURTYARD, 0, 0, true, false },
 	{ "h_courtyard_reverse", S_COURTYARD, -1, 0, true, false },
 	{ "h_courtyard", S_COURTYARD, 1, 0, true, false },
+	{ "h_grain_pan", S_PAN, 41.5, 3.7, true, false },
 	{ "h_pan_ref", S_PAN, 24, 6, true, false },  // the old pan, for reference
 	{ "h_turn24", S_HTURN, 24, 0.06, true, false },
 	{ "h_turn32", S_HTURN, 32, 0.10, true, false },
@@ -1207,6 +1208,19 @@ static double sequence_time(const scene *s, int frame, int phase, int multiplier
 	return (double)tick / multiplier;
 }
 
+static void camera_grain(const scene *s, int frame, size_t pixels, uint8_t *image)
+{
+	if (strcmp(s->name, "h_grain_pan")) return;
+	uint32_t state = 0x735a2be1u ^ ((uint32_t)frame * 0x9e3779b9u);
+	for (size_t i = 0; i < pixels; i++) {
+		state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+		int noise = (int)(state % 25u) - 12;
+		for (int c=0; c<3; c++) {
+			int value = image[4*i+c] + noise;
+			image[4*i+c] = value < 0 ? 0 : value > 255 ? 255 : value;
+		}
+	}
+}
 static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char *only, const kfg_tuning *tune)
 {
 	const size_t nbytes = (size_t)w * h * 4, npx = (size_t)w * h;
@@ -1234,12 +1248,13 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 			for (int f = 0; f < frames; f++) {
 				uint32_t fb = (uint32_t)f % KFG_RING, fa = (uint32_t)(f + KFG_RING - 1) % KFG_RING;
 				render(s, sequence_time(s, f, 0, mode), w, h, B);
+				camera_grain(s, f, npx, B);
 				if (physical_timestamps(s) && getenv("KFG_DETAIL_SEQUENCE_OUT")) {
 					char name[128];
 					snprintf(name, sizeof(name), "%s_source%d", s->name, f);
 					write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, B, w, h);
 				}
-				kfg_vk_upload_rgba8(vk, &e->color[fb], B);
+				kfg_vk_upload_rgba8(vk, &e->output, B);
 				kfg_plan p;
 				kfg_tuning pair_tune = *tune;
 				pair_tune.camera_ratio = f >= 2 ? 1.0f : 0.0f;
@@ -1254,6 +1269,10 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					hold = kfg_response_hold(prev, cur, hold);
 					pair_tune.interval_ratio = hold ? (float)cur / (float)prev : 0.0f;
 				}
+				kfg_plan_capture(&p, w, h, kfg_ref(KFG_ROLE_OUTPUT, 0, 0), fb, f >= 2 ? (int)fa : -1, &pair_tune);
+				if (run_plan(e, &p, NULL, NULL))
+					exit(2);
+				if (timing && f > 0) log_dispatch_times(e, &p);
 				kfg_plan_analyze(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, f > 0, f > 1 && g_temporal ? (int)fa : -1, &pair_tune);
 				run_plan(e, &p, NULL, NULL);
 				if (timing && f > 0) log_dispatch_times(e, &p);
@@ -1345,7 +1364,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					const double t = (double)j / mode;
 					render(s, sequence_time(s, f - 1, j, mode), w, h, T);
 					if (j == 0) {
-						memcpy(O, T, nbytes);
+						kfg_vk_download_rgba8(vk, &e->color[fa], O);
 					} else {
 						kfg_plan_generate(&p, (uint32_t)w, (uint32_t)h, fa, fb, fb, (float)t, hold ? KFG_FLAG_VARIABLE_INTERVAL : 0);
 						run_plan(e, &p, NULL, NULL);
@@ -1395,7 +1414,7 @@ static int hard_suite(kfg_vk *vk, engine *e, int w, int h, FILE *js, const char 
 					// Optional full real/intermediate sequence for post-filter comparisons.
 					// This only saves existing output; it changes no engine input or dispatch.
 					if (getenv("KFG_DETAIL_SEQUENCE_OUT") &&
-					    (physical_timestamps(s) || !strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
+					    (physical_timestamps(s) || !strcmp(s->name, "h_grain_pan") || !strcmp(s->name, "h_turn64") || !strcmp(s->name, "h_lines_slow") || !strcmp(s->name, "h_parallax"))) {
 						char name[128];
 						snprintf(name, sizeof(name), "%s_x%d_f%d_t%d_gen", s->name, mode, f, j);
 						write_ppm(getenv("KFG_DETAIL_SEQUENCE_OUT"), name, O, w, h);

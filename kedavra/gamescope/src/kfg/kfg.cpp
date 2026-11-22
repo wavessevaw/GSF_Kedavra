@@ -373,6 +373,7 @@ namespace kfg
 	{
 		switch ( eShader )
 		{
+			case KFG_SHADER_COPY:   return SHADER_TYPE_KFG_COPY;
 			case KFG_SHADER_REDUCE: return SHADER_TYPE_KFG_REDUCE;
 			case KFG_SHADER_ME:     return SHADER_TYPE_KFG_ME;
 			case KFG_SHADER_STATS:  return SHADER_TYPE_KFG_STATS;
@@ -674,7 +675,7 @@ namespace kfg
 			{
 				CVulkanTexture *pTex = slot < pass.nslots ? ResolveRef( r, pass.slots[ slot ] ) : nullptr;
 				pCmd->bindTexture( slot, pTex );
-				pCmd->setTextureSrgb( slot, true );  // raw values, see RecordCopy
+				pCmd->setTextureSrgb( slot, true );  // Bind the raw UNORM view; Gamescope decodes the layer at composition.
 				pCmd->setSamplerNearest( slot, ( pass.nearest_mask >> slot ) & 1u );
 				pCmd->setSamplerUnnormalized( slot, false );
 			}
@@ -682,31 +683,6 @@ namespace kfg
 			UploadParams( pCmd, pass.params );
 			pCmd->dispatch( pass.groups[ 0 ], pass.groups[ 1 ] );
 		}
-	}
-
-	static void RecordCopy( CVulkanCmdBuffer *pCmd, gamescope::Rc<CVulkanTexture> pSrc, CVulkanTexture *pDst )
-	{
-		kfg_params p = {};
-		p.dst_size[ 0 ] = int32_t( pDst->width() );
-		p.dst_size[ 1 ] = int32_t( pDst->height() );
-		p.src_size[ 0 ] = p.dst_size[ 0 ];
-		p.src_size[ 1 ] = p.dst_size[ 1 ];
-		pCmd->bindPipeline( g_device.pipeline( SHADER_TYPE_KFG_COPY ) );
-		pCmd->bindTexture( 0, std::move( pSrc ) );
-		// Gamescope's naming is inverted: setTextureSrgb( true ) binds the UNORM view
-		// ("srgbView", the raw encoded values) and false the _SRGB view, which decodes
-		// to linear. The ring must keep the raw values: the composite reuses the game
-		// layer's colorspace and decodes them itself. With false the ring held linear
-		// values that got decoded twice (dark, high contrast, flicker against
-		// passthrough frames; seen on the Deck).
-		pCmd->setTextureSrgb( 0, true );
-		pCmd->setSamplerNearest( 0, true );
-		pCmd->setSamplerUnnormalized( 0, false );
-		for ( uint32_t slot = 1; slot < KFG_MAX_SLOTS; slot++ )
-			pCmd->bindTexture( slot, nullptr );
-		pCmd->bindTarget( pDst );
-		UploadParams( pCmd, p );
-		pCmd->dispatch( kfg_div_up( pDst->width(), 8 ), kfg_div_up( pDst->height(), 8 ) );
 	}
 
 	// Writes from earlier composites (ring frames, analysis) become visible to this one.
@@ -827,10 +803,8 @@ namespace kfg
 		return kfg_post_for_transfer( cfg, nTransfer );
 	}
 
-	// Filters on layer 0. With pInto the result is copied there (a ring frame: the game's own
-	// frame filtered once, before generation) instead of replacing layer 0; false when the
-	// filters are off for this frame.
-	static bool RecordPost( CVulkanCmdBuffer *pCmd, State_t &s, FrameInfo_t::Layer_t &layer0, CVulkanTexture *pInto = nullptr )
+	// When requested by capture, return the pre-generation filter texture without replacing layer 0.
+	static bool RecordPost( CVulkanCmdBuffer *pCmd, State_t &s, FrameInfo_t::Layer_t &layer0, CVulkanTexture **ppFiltered = nullptr )
 	{
 		const uint32_t uWidth = layer0.tex->width(), uHeight = layer0.tex->height();
 		const int nTransfer = SourceTransfer( layer0 );
@@ -861,8 +835,8 @@ namespace kfg
 			return false;
 		Resolve_t r = { &s, nullptr, s.uNextOutput, layer0.tex.get() };
 		RecordPlan( pCmd, plan, r );
-		if ( pInto )
-			RecordCopy( pCmd, s.pPost[ nRing ].get(), pInto );
+		if ( ppFiltered )
+			*ppFiltered = s.pPost[ nRing ].get();
 		else
 			layer0.tex = s.pPost[ nRing ].get();
 		s.ulPostFrames++;
@@ -1332,11 +1306,6 @@ namespace kfg
 				RecordPlan( pCmd, s.analysisPlan, r, s.uAnalysisNext );
 				s.bAnalysisQueued = false;
 			}
-			// With filters on, the game's frame is filtered once on its way into the ring: real
-			// and generated frames then come out filtered, and the filters cost once per game
-			// frame instead of once per displayed frame (x3.75: a quarter as often).
-			if ( !s.bPostPending || kfg_post_after_generation( &s.post ) || !RecordPost( pCmd, s, layer0, cur.pColor.get() ) )
-				RecordCopy( pCmd, layer0.tex, cur.pColor.get() );
 			cur.ulLatchNs = s.ulLastSourceNs;
 			cur.ulIntervalNs = pPrev && cur.ulLatchNs > pPrev->ulLatchNs ? cur.ulLatchNs - pPrev->ulLatchNs : 0;
 			tune.camera_ratio = pPrev && pPrev->ulPrevID ? kfg_camera_ratio( pPrev->ulIntervalNs, cur.ulIntervalNs ) : 0.0f;
@@ -1355,6 +1324,14 @@ namespace kfg
 			// its vblank (on the Deck a third of the vblanks had no flip).
 			// The previous pair (ending at A) seeds the coarse search when A had its own pair.
 			const int prevPair = pPrev && pPrev->ulPrevID ? int( fa ) : -1;
+			// Capture raw encoded pixels once. A pre-generation effect supplies the input
+			// texture here; an after-generation effect still sees the final display frame.
+			CVulkanTexture *pSource = layer0.tex.get();
+			if ( s.bPostPending && !kfg_post_after_generation( &s.post ) )
+				RecordPost( pCmd, s, layer0, &pSource );
+			r.pPostIn = pSource;
+			kfg_plan_capture( &plan, s.uWidth, s.uHeight, kfg_ref( KFG_ROLE_POST_IN, 0, 0 ), fb, prevPair, &tune );
+			RecordPlan( pCmd, plan, r );
 			kfg_plan_analyze( &s.analysisPlan, s.uWidth, s.uHeight, fa, fb, fb, pPrev ? 1 : 0, prevPair, &tune );
 			s.bAnalysisQueued = true;
 			s.uAnalysisNext = 0;

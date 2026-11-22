@@ -53,12 +53,13 @@ enum kfg_shader {
 	KFG_SHADER_SMAA_EDGE,
 	KFG_SHADER_SMAA_WEIGHT,
 	KFG_SHADER_SMAA_BLEND,
+	KFG_SHADER_COPY,
 	KFG_SHADER_COUNT
 };
 
 static const char *const kfg_shader_names[KFG_SHADER_COUNT] = {
 	"kfg_reduce", "kfg_me", "kfg_stats", "kfg_select", "kfg_warp",
-	"kfg_post", "kfg_smaa_edge", "kfg_smaa_weight", "kfg_smaa_blend",
+	"kfg_post", "kfg_smaa_edge", "kfg_smaa_weight", "kfg_smaa_blend", "kfg_copy",
 };
 
 // Image roles. Ring-indexed roles carry the ring index in kfg_image_ref.ring.
@@ -292,6 +293,29 @@ static inline void kfg_set_domain(kfg_pass *x, const uint32_t dst[2], uint32_t g
 	x->params.dst_size[1] = (int32_t)dst[1];
 	x->groups[0] = kfg_div_up(dst[0], gx);
 	x->groups[1] = kfg_div_up(dst[1], gy);
+}
+
+// The compositor already copies each commit into the ring. A validated previous
+// pair can guide a small spatial exposure in that copy, before real/FG selection.
+static inline void kfg_plan_capture(kfg_plan *p, uint32_t w, uint32_t h, kfg_image_ref source,
+                                    uint32_t fb, int previous, const kfg_tuning *tune)
+{
+	p->n = 0;
+	kfg_pass *x = kfg_plan_add(p, KFG_SHADER_COPY, kfg_ref(KFG_ROLE_COLOR, fb, 0), "capture");
+	x->slots[0] = source;
+	x->nslots = 1;
+	uint32_t full[2] = {w, h};
+	kfg_set_domain(x, full, 8, 8);
+	if (previous >= 0 && tune->transfer == KFG_TRANSFER_SDR && tune->camera_ratio > 0.0f) {
+		uint32_t analysis[2];
+		kfg_analysis_size(w, h, analysis);
+		x->params.scale[0] = (float)w / analysis[0];
+		x->params.scale[1] = (float)h / analysis[1];
+		x->params.t = tune->camera_ratio;
+		x->slots[1] = kfg_ref(KFG_ROLE_COLOR, (uint32_t)previous, 0);
+		x->slots[2] = kfg_ref(KFG_ROLE_STATS, (uint32_t)previous, 0);
+		x->nslots = 3;
+	}
 }
 
 // Motion selection at block resolution and its repair rounds, ending in `out`.
