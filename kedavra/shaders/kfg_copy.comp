@@ -8,13 +8,28 @@ layout(local_size_x = 8, local_size_y = 8) in;
 
 vec3 cameraExposure(ivec2 p, vec3 center)
 {
-	if (u_t <= 0.0 || texelFetch(s_samplers[2], ivec2(0), 0).x > 0.5)
+	if (u_t <= 0.0)
+		return center;
+	vec4 stats = texelFetch(s_samplers[2], ivec2(0), 0);
+	if (stats.x > 0.5)
 		return center;
 	vec4 global = texelFetch(s_samplers[2], KFG_GLOBAL_TEXEL, 0);
 	vec2 motion = 0.5 * (global.xy - global.zw) * u_t;
 	float speed = length(motion);
 	if (speed <= 10.0 || length(global.xy + global.zw) > 2.0 + 0.2 * speed)
 		return center;
+	// Preserve the sharp inputs used by the contour tracker when a thin
+	// structure moves independently of the dominant camera translation.
+	// stats.y is the fraction of blocks with a large motion-compensated residual.
+	if (stats.y > 0.025) {
+		vec4 contour = texelFetch(s_samplers[2], KFG_CONTOUR_TEXEL, 0);
+		vec2 lastCamera = 0.5 * (global.xy - global.zw) * u_scale;
+		vec2 tolerance = max(vec2(3.0), abs(lastCamera) * 0.25);
+		bool crossesX = contour.z > 0.0 && abs(contour.x) >= 4.0 && abs(contour.x - lastCamera.x) > tolerance.x;
+		bool crossesY = contour.w > 0.0 && abs(contour.y) >= 4.0 && abs(contour.y - lastCamera.y) > tolerance.y;
+		if (crossesX || crossesY)
+			return center;
+	}
 	vec2 v = motion * u_scale;
 	vec2 prev = vec2(p) - v;
 	if (any(lessThan(prev, vec2(0))) || any(greaterThan(prev, vec2(u_dstSize - 1))))

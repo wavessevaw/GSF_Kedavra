@@ -4,7 +4,7 @@ import json
 import sys
 
 root = Path(sys.argv[1])
-for scene in ("h_grain_pan", "h_lines_slow"):
+for scene in ("h_grain_pan", "h_lines_slow", "h_parallax"):
     def rows(side):
         return json.loads((root / f"{scene}-{side}.json").read_text())["hard"]
 

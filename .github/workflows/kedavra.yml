@@ -113,7 +113,7 @@ jobs:
           git fetch --depth=1 origin 38376ad7015fbf078b06df7d4abaadb8fe29f0d6
           git show 38376ad7015fbf078b06df7d4abaadb8fe29f0d6:kedavra/shaders/kfg_copy.comp > /tmp/capture-before/kfg_copy.comp
           glslangValidator -V --target-env vulkan1.1 -Ikedavra/shaders /tmp/capture-before/kfg_copy.comp -o /tmp/capture-before/kfg_copy.spv
-          for scene in h_grain_pan h_lines_slow; do
+          for scene in h_grain_pan h_lines_slow h_parallax; do
             for side in before after; do
               shaders=kedavra/build
               if [[ "$side" == before ]]; then shaders=/tmp/capture-before; fi
