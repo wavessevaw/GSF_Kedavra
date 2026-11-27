@@ -112,7 +112,7 @@ typedef struct kfg_decision {
 	int64_t delay;       // L_latest - content after this decision
 	bool skipped;        // this decision jumped content forward by whole vblanks (resync)
 	bool catchup;        // this decision advanced content faster than one vblank (silk catch-up)
-	int64_t pos;         // content position in 1/KFG_SCHED_SUB vblank (content * SUB + sub-step)
+	int64_t pos;         // scheduler playhead (phase_num/den identifies the rendered sample); position in 1/KFG_SCHED_SUB vblank (content * SUB + sub-step)
 } kfg_decision;
 
 typedef struct kfg_sched {
@@ -469,6 +469,62 @@ static inline bool kfg_sched_regular_90(const kfg_sched *s)
 	return true;
 }
 
+// The response modes can show the real endpoint one refresh early. With a
+// four-refresh input pair this can leave an uneven last step. Adjust only
+// the sampled phase. Keep the queue, endpoint and readiness decisions intact.
+static inline void kfg_sched_balance_phase(kfg_sched *s, kfg_decision *d,
+                                            int64_t k, int64_t base, int64_t p,
+                                            unsigned prior_gen)
+{
+	const uint32_t n = s->cfg.multiplier;
+	const bool x2 = n == 2 && s->cfg.prefer_real_60 && prior_gen == 0;
+	const bool x3 = n == 3 && s->cfg.prefer_real_90 && prior_gen == 1 && d->src_b == s->last_gen_pair;
+	// Keep the exact midpoint on its existing, cheaper warp path.
+	if ((!x2 && !x3) || d->phase_num * 2 == d->phase_den)
+		return;
+
+	const kfg_source_slot *a = kfg_sched_find(s, d->src_a);
+	const kfg_source_slot *b = kfg_sched_find(s, d->src_b);
+	const int64_t q = KFG_SCHED_SUB;
+	if (!a || !b || b->t - a->t != n + 1 || b->t - a->t > s->cfg.max_fill_span ||
+		(x2 && base != a->t * q) || b->t * q - p <= q || b->t * q - p > 2 * q)
+		return;
+
+	// An isolated late latch near 30 FPS is a poor predictor of the next slot.
+	if (x3) {
+		if (!kfg_sched_regular_90(s))
+			return;
+		bool recurring = false;
+		for (uint32_t i = 1; i < s->count; ++i) {
+			const kfg_source_slot *recent = kfg_sched_slot(s, i - 1);
+			if (recent->latch < b->latch && recent->latch - kfg_sched_slot(s, i)->latch == 4) {
+				recurring = true;
+				break;
+			}
+		}
+		if (!recurring)
+			return;
+	}
+
+	// The following pair must already be known and usable after the endpoint.
+	kfg_candidate next = kfg_sched_eval_pos(s, (b->t + 1) * q, k + 2);
+	if (!next.ok || next.show != KFG_SHOW_GEN)
+		return;
+
+	int64_t balanced = base + (b->t * q - base) / 2;
+	// The smallest Silk step is half a refresh. Leave at least one substep
+	// before that next position, even if an intervening latch changes the plan.
+	if (balanced > p + q / 2 - 1)
+		balanced = p + q / 2 - 1;
+	if (balanced <= p)
+		return;
+	uint32_t num = (uint32_t)(balanced - a->t * q);
+	uint32_t den = (uint32_t)((b->t - a->t) * q);
+	uint32_t g = kfg_sched_gcd(num, den);
+	d->phase_num = num / g;
+	d->phase_den = den / g;
+}
+
 // Decide the output for vblank k (strictly increasing between calls).
 static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 {
@@ -687,6 +743,7 @@ static inline kfg_decision kfg_sched_decide(kfg_sched *s, int64_t k)
 			d.phase_num = cand.num;
 			d.phase_den = cand.den;
 			if (cand.show == KFG_SHOW_GEN) {
+				kfg_sched_balance_phase(s, &d, k, base, p, prior_gen);
 				s->consecutive_gen = cand.src_b == s->last_gen_pair ? prior_gen + 1 : 1;
 				s->last_gen_pair = cand.src_b;
 				s->last_gen_phase_num = cand.num;
