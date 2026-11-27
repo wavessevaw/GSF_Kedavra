@@ -1,0 +1,204 @@
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 4a48f8b..685b523 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -3910,7 +3910,7 @@ namespace gamescope
+ 
+ 			GamescopeUpscaleFilter eLayer0Filter = pFrameInfo->layers.get( 0 ).filter;
+ 			bool bNeedsCompositeFromFilter = ( eLayer0Filter == GamescopeUpscaleFilter::NEAREST ||
+-			                                   eLayer0Filter == GamescopeUpscaleFilter::PIXEL ) && !bLayer0ScreenSize;
++			                                   (eLayer0Filter == GamescopeUpscaleFilter::PIXEL || eLayer0Filter == GamescopeUpscaleFilter::KEDAVRA) ) && !bLayer0ScreenSize;
+ 
+ 			bool bNeedsFullComposite = false;
+ 			bNeedsFullComposite |= cv_composite_force;
+diff --git a/src/Backends/OpenVRBackend.cpp b/src/Backends/OpenVRBackend.cpp
+index dae8cb3..5229e61 100644
+--- a/src/Backends/OpenVRBackend.cpp
++++ b/src/Backends/OpenVRBackend.cpp
+@@ -1846,7 +1846,7 @@ namespace gamescope
+ 
+         GamescopeUpscaleFilter eLayer0Filter = pFrameInfo->layers.get( 0 ).filter;
+         bool bNeedsCompositeFromFilter = ( eLayer0Filter == GamescopeUpscaleFilter::NEAREST ||
+-                                           eLayer0Filter == GamescopeUpscaleFilter::PIXEL ) && !bLayer0ScreenSize;
++                                           (eLayer0Filter == GamescopeUpscaleFilter::PIXEL || eLayer0Filter == GamescopeUpscaleFilter::KEDAVRA) ) && !bLayer0ScreenSize;
+ 
+         bNeedsFullComposite |= cv_composite_force;
+         bNeedsFullComposite |= pFrameInfo->useFSRLayer0;
+diff --git a/src/Backends/WaylandBackend.cpp b/src/Backends/WaylandBackend.cpp
+index bc9293d..fc03a8e 100644
+--- a/src/Backends/WaylandBackend.cpp
++++ b/src/Backends/WaylandBackend.cpp
+@@ -1097,7 +1097,7 @@ namespace gamescope
+ 
+             GamescopeUpscaleFilter eLayer0Filter = pFrameInfo->layers.get( 0 ).filter;
+             bool bNeedsCompositeFromFilter = ( eLayer0Filter == GamescopeUpscaleFilter::NEAREST ||
+-                                               eLayer0Filter == GamescopeUpscaleFilter::PIXEL ) && !bLayer0ScreenSize;
++                                               (eLayer0Filter == GamescopeUpscaleFilter::PIXEL || eLayer0Filter == GamescopeUpscaleFilter::KEDAVRA) ) && !bLayer0ScreenSize;
+ 
+             bNeedsFullComposite |= cv_composite_force;
+             bNeedsFullComposite |= pFrameInfo->useFSRLayer0;
+diff --git a/src/main.hpp b/src/main.hpp
+index b2a169f..adeed71 100644
+--- a/src/main.hpp
++++ b/src/main.hpp
+@@ -45,6 +45,7 @@ enum class GamescopeUpscaleFilter : uint32_t
+     NIS,
+     PIXEL,
+     SGSR,
++    KEDAVRA, // internal game-layer reconstruction
+ 
+     FROM_VIEW = 0xF, // internal
+ };
+diff --git a/src/shaders/composite.h b/src/shaders/composite.h
+index 7f3645e..461bee7 100644
+--- a/src/shaders/composite.h
++++ b/src/shaders/composite.h
+@@ -1,6 +1,7 @@
+ #include "colorimetry.h"
+ 
+ #include "shaderfilter.h"
++#include "kfg_sr.glsl"
+ #include "alphamode.h"
+ 
+ // Rotate only the final store coordinate (CCW 90-degree steps: 1=90, 2=180,
+@@ -198,7 +199,11 @@ vec4 sampleLayerEx(sampler2D layerSampler, uint offsetLayerIdx, uint colorspaceL
+ 
+     uint colorspace = get_layer_colorspace(colorspaceLayerIdx);
+     vec4 color;
+-    if (get_layer_shaderfilter(offsetLayerIdx) == filter_pixel) {
++    if (unnormalized && get_layer_shaderfilter(offsetLayerIdx) == 6u) {
++        color = kfgReconstruct(layerSampler, coord, ivec2(texSize));
++        color.rgb = colorspace_plane_degamma_tf(color.rgb, colorspace);
++    }
++    else if (get_layer_shaderfilter(offsetLayerIdx) == filter_pixel) {
+         vec2 output_res = texSize / u_scale[offsetLayerIdx];
+         vec2 extent = max((texSize / output_res), vec2(1.0 / 256.0));
+         color = sampleBandLimited(layerSampler, coord, unnormalized ? vec2(1.0f) : texSize, unnormalized ? vec2(1.0f) : vec2(1.0f) / texSize, extent, colorspace, unnormalized);
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 6fa5617..83d41fc 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -1092,6 +1092,49 @@ global_focus_t *GetFocusForWindow( steamcompmgr_win_t *w )
+ }
+ 
+ uint32_t		currentOutputWidth, currentOutputHeight;
++// SteamOS normally keeps the client on Xwayland 0 and the game on 1.
++// A launch notification arms one transaction on an empty game display.
++// No Steam property, physical mode, or game configuration is persisted.
++struct SrVirtualMode {
++	uint32_t app = 0, launch = 0;
++	int width = 0, height = 0, originalWidth = 0, originalHeight = 0;
++};
++static SrVirtualMode srMode;
++static uint32_t srLastLaunch;
++static void UpdateSrDisplay()
++{
++	auto req = kfg::SuperResolutionRequest();
++	if (!req.app && !srMode.app) return;
++	auto *server = wlserver_get_xwayland_server(1);
++	if (!server || !server->ctx) { srMode = {}; return; }
++	if (srMode.app && (srMode.app != req.app || !req.app ||
++	    srMode.originalWidth != int(currentOutputWidth) || srMode.originalHeight != int(currentOutputHeight))) {
++		wlserver_lock();
++		int rc = wlserver_exchange_virtual_size(1, srMode.width, srMode.height,
++		                                       srMode.originalWidth, srMode.originalHeight);
++		wlserver_unlock();
++		if (rc >= 0) srMode = {}; // An external change supersedes our receipt.
++		return;
++	}
++	if (srMode.app || !req.launch || req.launch == srLastLaunch || req.height >= 800) return;
++	srLastLaunch = req.launch;
++	// Skip multi-seat layouts and dedicated dynamically allocated servers.
++	if (g_nXWaylandCount != 2 || wlserver_get_xwayland_server(2) || !GetBackend()->GetCurrentConnector())
++		return;
++	for (auto *w = server->ctx->list; w; w = w->xwayland().next)
++		if (w->xwayland().a.map_state == IsViewable && w->xwayland().a.c_class == InputOutput &&
++		    w->xwayland().a.width > 1 && w->xwayland().a.height > 1)
++			return;
++	int ow = currentOutputWidth, oh = currentOutputHeight;
++	if (ow < 640 || oh < 480 || ow > 7680 || oh > 4320) return;
++	int width = 2 * ((ow * int(req.height) + 800) / 1600);
++	int height = 2 * ((oh * int(req.height) + 800) / 1600);
++	wlserver_lock();
++	int rc = wlserver_exchange_virtual_size(1, ow, oh, width, height);
++	wlserver_unlock();
++	if (rc == 1) srMode = {req.app, req.launch, width, height, ow, oh};
++}
++
+ int 			currentOutputRefresh;
+ uint32_t		currentOutputRotation = 0;
+ bool			currentHDROutput = false;
+@@ -3510,7 +3553,7 @@ paint_all( global_focus_t *pFocus, bool async, bool bRepeatFrame )
+ 	const bool bKfgPaint = pConnector && !pFocus->pVirtualConnector;
+ 	if ( bKfgPaint )
+ 		kfg::OnPaint( &frameInfo, pFocus->ulBasePlaneCommitID, pFocus->uBasePlaneAppID,
+-			g_SteamCompMgrVBlankTime.schedule.ulTargetVBlank, g_SteamCompMgrVBlankTime.schedule.ulRefreshCycle );
++			g_SteamCompMgrVBlankTime.schedule.ulTargetVBlank, g_SteamCompMgrVBlankTime.schedule.ulRefreshCycle, currentOutputWidth, currentOutputHeight, srMode.app, srMode.width, srMode.height );
+ 
+ 	const bool bPresentFailed = pConnector && pConnector->Present( &frameInfo, async ) != 0;
+ 	if ( bKfgPaint )
+@@ -7305,6 +7348,7 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+ 			gamescope_xwayland_server_t *server = wlserver_get_xwayland_server( server_idx );
+ 			if ( server )
+ 			{
++				if (server_idx == 1) srMode = {};
+ 				bool root_size_identical = server->ctx->root_width == width && server->ctx->root_height == height;
+ 
+ 				wlserver_lock();
+@@ -8643,7 +8687,8 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
+ 	}
+ 
+ 	bool bValidPreemptiveScale = newCommit->pAcquirePoint && pUpscaleFocus && cv_upscale_preemptive;
+-	bool bPreemptiveUpscale = bValidPreemptiveScale && newCommit->ShouldPreemptivelyUpscale( pUpscaleFocus->eUpscaleFilter, pUpscaleFocus->eUpscaleScaler );
++	const auto sr = kfg::SuperResolutionRequest();
++	bool bPreemptiveUpscale = !(sr.app && sr.app == w->appID) && bValidPreemptiveScale && newCommit->ShouldPreemptivelyUpscale( pUpscaleFocus->eUpscaleFilter, pUpscaleFocus->eUpscaleScaler );
+ 
+ 	bool bKnownReady = false;
+ 
+@@ -10255,6 +10300,7 @@ steamcompmgr_main(int argc, char **argv)
+ 		}
+ 
+ 		g_SteamCompMgrWaiter.PollEvents();
++		UpdateSrDisplay();
+ 
+ 		bool vblank = false;
+ 		if ( std::optional<gamescope::VBlankTime> pendingVBlank = GetVBlankTimer().ProcessVBlank() )
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+index ec879f3..d023696 100644
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -3697,6 +3697,21 @@ void wlserver_x11_surface_info_finish( struct wlserver_x11_surface_info *surf )
+ 	wl_list_remove( &surf->pending_link );
+ }
+ 
++int wlserver_exchange_virtual_size(size_t index, int fromW, int fromH, int toW, int toH)
++{
++	assert(wlserver_is_lock_held());
++	auto *server = wlserver_get_xwayland_server(index);
++	if (!index || !server) return 0;
++	auto *output = server->get_output();
++	if (output->width != fromW || output->height != fromH) return 0;
++	wlr_output_state state;
++	wlr_output_state_init(&state);
++	wlr_output_state_set_custom_mode(&state, toW, toH, output->refresh);
++	bool ok = wlr_output_commit_state(output, &state);
++	wlr_output_state_finish(&state);
++	return ok ? 1 : -1;
++}
++
+ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int nRefreshmHz )
+ {
+ 	assert( wlserver_is_lock_held() );
+diff --git a/src/wlserver.hpp b/src/wlserver.hpp
+index 2817d97..9a5932e 100644
+--- a/src/wlserver.hpp
++++ b/src/wlserver.hpp
+@@ -306,6 +306,8 @@ const char *wlserver_get_wl_display_name( void );
+ void wlserver_x11_surface_info_init( struct wlserver_x11_surface_info *surf, gamescope_xwayland_server_t *server, uint32_t x11_id );
+ void wlserver_x11_surface_info_finish( struct wlserver_x11_surface_info *surf );
+ 
++// Compare-and-exchange only the virtual output. 0 = mismatched, 1 = applied, -1 = failed.
++int wlserver_exchange_virtual_size(size_t index, int fromW, int fromH, int toW, int toH);
+ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int refresh );
+ 
+ extern std::atomic<bool> g_bPendingTouchMovement;

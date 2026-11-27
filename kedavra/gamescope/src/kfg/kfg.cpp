@@ -64,6 +64,26 @@ namespace kfg
 		};
 	}
 
+	// A short lease lets Gamescope restore its own temporary display after
+	// controller death. No settings or launch options are written to Steam.
+	static SrRequest g_sr{};
+	gamescope::ConVar<std::string> cv_kfg_sr{ "kfg_sr", "0", "Temporary game resolution lease",
+		[](gamescope::ConVar<std::string> &cv) {
+			unsigned app = 0, height = 0, launch = 0;
+			char extra;
+			SrRequest request{};
+			if (sscanf(cv.Get().c_str(), "%u:%u:%u%c", &app, &height, &launch, &extra) == 3 &&
+			    app && app != 769 && (height == 480 || height == 500 || height == 540 ||
+			    height == 600 || height == 720 || height == 800))
+				request = {app, height, launch, get_time_in_nanos() + 20000000000ull};
+			std::scoped_lock lock(g_CvarMutex);
+			g_sr = request;
+		} };
+	SrRequest SuperResolutionRequest() {
+		std::scoped_lock lock(g_CvarMutex);
+		return g_sr.until > get_time_in_nanos() ? g_sr : SrRequest{};
+	}
+
 	gamescope::ConVar<std::string> cv_kfg_trace{ "kfg_trace", "", "CSV trace of every KMS flip while frame generation is on (kedavra/tools/kfg_pacing.py). Empty = off.", CopyTo( g_sTracePath ) };
 	gamescope::ConVar<std::string> cv_kfg_status{ "kfg_status", "", "JSON status file, rewritten once per second. Empty = $XDG_RUNTIME_DIR/kedavra-status.json.", CopyTo( g_sStatusPath ) };
 	gamescope::ConVar<bool> cv_kfg_debug_marker{ "kfg_debug_marker", false, "Mark generated frames with a corner square, for camera checks." };
@@ -160,6 +180,10 @@ namespace kfg
 		bool bSteamUI = false;  // the Steam client is the base plane (its menus, not the game)
 		bool bVRRHeld = false;  // adaptive sync was asked for and is held off for generation
 		uint32_t uAnalysisPixels = 0;  // kfg_analysis_pixels the images were made for
+		uint32_t srWidth = 0, srHeight = 0, srOutputWidth = 0, srOutputHeight = 0;
+		bool srSelected = false;
+		uint32_t srManagedApp = 0;
+		int srVirtualWidth = 0, srVirtualHeight = 0;
 		uint32_t uPaintAppID = 0;  // app id of the base plane at the last paint (diagnostics)
 		int nLayer0Format = 0, nLayer0Colorspace = 0;  // last layer 0 that generation could not take
 		const char *pszLastProblem = "none";
@@ -992,7 +1016,7 @@ namespace kfg
 		if ( s.uWidth )
 			kfg_analysis_size( s.uWidth, s.uHeight, asz );
 		fprintf( f,
-			"{\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
+			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
 			"\"refresh_ns\":%" PRIu64 ",\"width\":%u,\"height\":%u,"
 			"\"paints\":%" PRIu64 ",\"applied\":%" PRIu64 ",\"bypass\":%" PRIu64 ",\"ring_miss\":%" PRIu64 ",\"unsupported\":%" PRIu64 ","
 			"\"sources\":%" PRIu64 ",\"real\":%" PRIu64 ",\"gen\":%" PRIu64 ",\"repeat\":%" PRIu64 ",\"skip\":%" PRIu64 ",\"resync\":%" PRIu64 ",\"degrade\":%" PRIu64 ",\"catchup\":%" PRIu64 ","
@@ -1004,6 +1028,7 @@ namespace kfg
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
+			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1099,7 +1124,7 @@ namespace kfg
 			( kfg_post_active( &g_State.post ) || ( g_Hud.bVisible && g_Hud.bUpload ) ) );
 	}
 
-	void OnPaint( FrameInfo_t *pFrameInfo, uint64_t ulBaseCommitID, uint32_t uAppID, uint64_t ulTargetVBlankNs, uint64_t ulRefreshCycleNs )
+	void OnPaint( FrameInfo_t *pFrameInfo, uint64_t ulBaseCommitID, uint32_t uAppID, uint64_t ulTargetVBlankNs, uint64_t ulRefreshCycleNs, uint32_t outputWidth, uint32_t outputHeight, uint32_t managedApp, int virtualWidth, int virtualHeight )
 	{
 		State_t &s = g_State;
 		const uint64_t ulNow = get_time_in_nanos();
@@ -1117,6 +1142,29 @@ namespace kfg
 			pFrameInfo->allowVRR = false;
 
 		StartTraceWriter();
+		s.srManagedApp = managedApp; s.srVirtualWidth = virtualWidth; s.srVirtualHeight = virtualHeight;
+		s.srSelected = false;
+		s.srWidth = s.srHeight = 0;
+		s.srOutputWidth = outputWidth;
+		s.srOutputHeight = outputHeight;
+		if (pFrameInfo->layers.count()) {
+			auto &base = pFrameInfo->layers.get(0);
+			const auto sr = SuperResolutionRequest();
+			if (base.tex) {
+				s.srWidth = base.tex->width();
+				s.srHeight = base.tex->height();
+				// Respect other sources, aspect ratios, HDR, video and overlays.
+				// Use the compositor's actual scale and offset for the game layer.
+				s.srSelected = sr.app && sr.app == uAppID && !pFrameInfo->blurLayer0 &&
+					!pFrameInfo->bFadingOut && SourceTransfer(base) == KFG_TRANSFER_SDR &&
+					!base.isYcbcr() && base.scale.x >= 0.599f && base.scale.y >= 0.599f &&
+					base.scale.x < 0.999f && base.scale.y < 0.999f;
+				if (s.srSelected) {
+					base.filter = GamescopeUpscaleFilter::KEDAVRA;
+					pFrameInfo->useFSRLayer0 = pFrameInfo->useNISLayer0 = pFrameInfo->useSGSRLayer0 = false;
+				}
+			}
+		}
 		WriteStatus( s, ulNow );
 		HudPoll( ulNow );
 

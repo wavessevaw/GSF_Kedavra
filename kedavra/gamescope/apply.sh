@@ -27,6 +27,13 @@ else
 	exit 1
 fi
 
+if git -C "$G" apply --check "$HERE/super-resolution.patch" 2>/dev/null; then
+	git -C "$G" apply "$HERE/super-resolution.patch"
+elif ! git -C "$G" apply --reverse --check "$HERE/super-resolution.patch" 2>/dev/null; then
+	echo "error: incompatible super resolution hooks" >&2
+	exit 1
+fi
+cp "$K/shaders/kfg_sr.glsl" "$G/src/shaders/"
 mkdir -p "$G/src/kfg/smaa" "$G/src/shaders/smaa"
 cp "$HERE/src/kfg/kfg_hud_input.hpp" "$G/src/kfg/"
 cp "$HERE/src/kfg/kfg.cpp" "$HERE/src/kfg/kfg.hpp" "$G/src/kfg/"

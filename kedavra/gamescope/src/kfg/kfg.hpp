@@ -30,6 +30,8 @@ namespace kfg
 	// Frame limit the game gets while generation is on: refresh / multiplier, so the source
 	// lands on a fixed vblank cadence without a manual FPS limit. 0 = no KEDAVRA limit.
 	int SourceCapFPS( int nRefreshHz );
+	struct SrRequest { uint32_t app, height, launch; uint64_t until; };
+	SrRequest SuperResolutionRequest();
 	bool WantsEveryVBlank();
 	// DRM backend: true while every frame must go through the composite (generation, or
 	// filters on the game's frames), so it is never scanned out directly.
@@ -37,7 +39,7 @@ namespace kfg
 
 	// steamcompmgr paint_all, before the connector presents frameInfo. Feeds the
 	// scheduler with the base plane commit and the vblank this paint targets.
-	void OnPaint( FrameInfo_t *pFrameInfo, uint64_t ulBaseCommitID, uint32_t uAppID, uint64_t ulTargetVBlankNs, uint64_t ulRefreshCycleNs );
+	void OnPaint( FrameInfo_t *pFrameInfo, uint64_t ulBaseCommitID, uint32_t uAppID, uint64_t ulTargetVBlankNs, uint64_t ulRefreshCycleNs, uint32_t outputWidth, uint32_t outputHeight, uint32_t managedApp, int virtualWidth, int virtualHeight );
 	// steamcompmgr paint_all, after the present: whether it reached the backend.
 	void OnPresented( bool bPresented );
 
