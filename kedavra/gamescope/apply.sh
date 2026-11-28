@@ -18,7 +18,9 @@ if [ -d "$G/.git" ]; then
 	[ "$have" = "$GAMESCOPE_COMMIT" ] || echo "warning: $G is at $have, hooks were made against $GAMESCOPE_COMMIT" >&2
 fi
 
-if git -C "$G" apply --check "$HERE/hooks.patch" 2>/dev/null; then
+if git -C "$G" apply --reverse --check "$HERE/super-resolution.patch" 2>/dev/null; then
+    echo "super resolution hooks already applied" >&2
+elif git -C "$G" apply --check "$HERE/hooks.patch" 2>/dev/null; then
 	git -C "$G" apply "$HERE/hooks.patch"
 elif git -C "$G" apply --check --reverse "$HERE/hooks.patch" 2>/dev/null; then
 	echo "hooks already applied" >&2
