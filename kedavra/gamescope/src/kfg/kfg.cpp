@@ -979,7 +979,7 @@ namespace kfg
             }
         }
         if(!chain[0]) return false;
-        if(!target.pSrDetail) target.pSrDetail=CreateImage(1280,800,KFG_FORMAT_RGBA8);
+        if(!target.pSrDetail) target.pSrDetail=CreateImage(1280,800,KFG_FORMAT_R8);
         if(!target.pSrDetail) return false;
         gamescope::Rc<CVulkanTexture> focused=layer.tex;
         if(s.srTargetPhase<0.999f) {

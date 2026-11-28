@@ -678,7 +678,7 @@ static void test_sr_inverse4(kfg_vk *vk)
     int ok=1;
     for(int i=0;i<12;i++)
         if(kfg_vk_image_create(vk,&e.src[i],i<6?rgba:half,i<6?W:i<9?W/4:1,i<6?H:i<9?H/4:1)) { ok=0;break; }
-    if(!ok||kfg_vk_image_create(vk,&e.out,rgba,OW,OH)||kfg_vk_image_create(vk,&e.cache,rgba,OW,OH)) { CHECK(0,"SR4 image allocation");goto cleanup; }
+    if(!ok||kfg_vk_image_create(vk,&e.out,rgba,OW,OH)||kfg_vk_image_create(vk,&e.cache,kfg_vk_format(KFG_FORMAT_R8),OW,OH)) { CHECK(0,"SR4 image allocation");goto cleanup; }
     float gt[OW*OH];
     uint8_t raw[4][W*H*4], out[OW*OH*4],fallback[OW*OH*4],direct[OW*OH*4];
     const int sx[4]={0,1,0,1},sy[4]={0,0,1,1};
