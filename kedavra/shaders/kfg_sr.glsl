@@ -26,10 +26,19 @@ vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size)
     vec3 top = max(max(a.rgb,b.rgb),max(c.rgb,d.rgb));
     if (all(equal(lo,top)) || min(min(a.a,b.a),min(c.a,d.a)) < 0.999)
         return base;
-    vec3 hx = mix(srSlope(srTexel(tex,i-X,hi).rgb,a.rgb,b.rgb,srTexel(tex,i+2*X,hi).rgb,f.x),
-                  srSlope(srTexel(tex,i+Y-X,hi).rgb,c.rgb,d.rgb,srTexel(tex,i+Y+2*X,hi).rgb,f.x), f.y);
-    vec3 hy = mix(srSlope(srTexel(tex,i-Y,hi).rgb,a.rgb,c.rgb,srTexel(tex,i+2*Y,hi).rgb,f.y),
-                  srSlope(srTexel(tex,i+X-Y,hi).rgb,b.rgb,d.rgb,srTexel(tex,i+X+2*Y,hi).rgb,f.y), f.x);
+    vec3 leftA=srTexel(tex,i-X,hi).rgb, rightB=srTexel(tex,i+2*X,hi).rgb;
+    vec3 leftC=srTexel(tex,i+Y-X,hi).rgb, rightD=srTexel(tex,i+Y+2*X,hi).rgb;
+    vec3 upA=srTexel(tex,i-Y,hi).rgb, downC=srTexel(tex,i+2*Y,hi).rgb;
+    vec3 upB=srTexel(tex,i+X-Y,hi).rgb, downD=srTexel(tex,i+X+2*Y,hi).rgb;
+    vec3 hx = mix(srSlope(leftA,a.rgb,b.rgb,rightB,f.x), srSlope(leftC,c.rgb,d.rgb,rightD,f.x),f.y);
+    vec3 hy = mix(srSlope(upA,a.rgb,c.rgb,downC,f.y), srSlope(upB,b.rgb,d.rgb,downD,f.y),f.x);
+    // A finite source pixel covers an area. Compensate its footprint using
+    // the four local curvatures already in these registers. Neighbour bounds
+    // and a contrast-dependent limit cap the response on thin silhouettes.
+    vec3 inner = mix(mix(b.rgb+c.rgb,a.rgb+d.rgb,f.x),mix(a.rgb+d.rgb,b.rgb+c.rgb,f.x),f.y);
+    vec3 outer = mix(mix(leftA+upA,rightB+upB,f.x),mix(leftC+downC,rightD+downD,f.x),f.y);
+    vec3 curvature = 4.0*base.rgb-inner-outer;
+    vec3 limit = 0.18*(top-lo);
     // On a diagonal boundary the four samples describe two triangles.
     // Prefer the triangulation whose shared edge crosses less colour change.
     vec3 weights = vec3(0.25,0.50,0.25);
@@ -37,5 +46,5 @@ vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size)
     float trust = abs(ad-bc)/(ad+bc+0.015);
     float joint = ad < bc ? min(f.x,f.y) : max(f.x+f.y-1.0,0.0);
     vec3 diagonal = (joint-f.x*f.y)*(a.rgb-b.rgb-c.rgb+d.rgb);
-    return vec4(clamp(base.rgb + mix(hx+hy, diagonal, trust*trust),lo,top),base.a);
+    return vec4(clamp(base.rgb + mix(hx+hy, diagonal, trust*trust) + clamp(0.18*curvature,-limit,limit),lo,top),base.a);
 }
