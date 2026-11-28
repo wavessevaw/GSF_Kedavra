@@ -40,7 +40,7 @@ extern "C" {
 #define KFG_LEVELS 4      // luma levels 1..4
 #define KFG_STATS_WIDTH 5
 #define KFG_RING 4        // frames / pairs kept so delayed outputs can still use their pair
-#define KFG_MAX_SLOTS 5
+#define KFG_MAX_SLOTS 12 // four-frame SR uses 12 of the shared 16 sampler slots
 #define KFG_MAX_PASSES 16
 
 enum kfg_shader {

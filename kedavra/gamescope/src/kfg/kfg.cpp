@@ -113,6 +113,7 @@ namespace kfg
 		unsigned uResponseHold = 0;
 		uint64_t ulPrevID = 0;      // the frame the pair analysis of this one used; 0 = none
 		bool bValid = false;
+        bool bAnalysisReady = false;
 		gamescope::OwningRc<CVulkanTexture> pColor;
 		gamescope::OwningRc<CVulkanTexture> pLuma[ KFG_LEVELS + 1 ];
 		gamescope::OwningRc<CVulkanTexture> pFlow[ KFG_LEVELS + 1 ];  // pair (ulPrevID, ulID)
@@ -183,6 +184,10 @@ namespace kfg
 		uint32_t srWidth = 0, srHeight = 0, srOutputWidth = 0, srOutputHeight = 0;
 		bool srSelected = false;
         bool srInverseActive = false;
+        bool srCaptureOnly = false;
+        uint64_t srTargetID = 0, srAnalysisFrameID = 0;
+        float srTargetPhase = 1.0f;
+        uint32_t srHistoryFrames = 0;
         uint64_t srInverseFrames = 0;
         gamescope::OwningRc<CVulkanTexture> pSrInverseOutput;
 		uint32_t srManagedApp = 0;
@@ -482,6 +487,8 @@ namespace kfg
 		s.pOutput[ 0 ] = s.pOutput[ 1 ] = nullptr;
 		s.pLastShown = nullptr;
 		s.bAnalysisQueued = false;
+        s.srTargetID = s.srAnalysisFrameID = 0;
+        s.srHistoryFrames = 0; s.srInverseActive = false;
 		s.uWidth = s.uHeight = 0;
 	}
 
@@ -555,9 +562,13 @@ namespace kfg
 		for ( Frame_t &f : s.frames )
 		{
 			f.bValid = false;
+            f.bAnalysisReady = false;
 			f.ulPrevID = 0;
 		}
 		s.pLastShown = nullptr;
+        s.bAnalysisQueued = false;
+        s.srTargetID = s.srAnalysisFrameID = 0;
+        s.srHistoryFrames = 0; s.srInverseActive = false;
 		if ( s.bInit )
 			kfg_sched_reset_history( &s.sched );
 		s.ulLastCommitID = 0;
@@ -914,6 +925,33 @@ namespace kfg
              s.post.grade || s.post.finish || s.post.aa!=KFG_AA_NONE ||
              SourceTransfer(layer)!=KFG_TRANSFER_SDR )
             return false;
+        // A complete, already submitted chain containing the displayed real
+        // anchor (or generated pair's B) is mandatory. The six-slot ring
+        // allows four ready frames even while the newest pair is in flight.
+        Frame_t *chain[4] = {};
+        uint32_t anchor=0;
+        uint64_t newest=0;
+        s.srHistoryFrames=0;
+        if(!s.srTargetID) return false;
+        for(Frame_t &end:s.frames) {
+            if(!end.bValid || end.ulID<=newest) continue;
+            Frame_t *c[4]={&end,nullptr,nullptr,nullptr};
+            uint32_t count=1;
+            for(uint32_t k=0;k<3;k++) {
+                if(!c[k]||!c[k]->bAnalysisReady||!c[k]->ulPrevID) break;
+                c[k+1]=FindFrame(s,c[k]->ulPrevID);
+                if(!c[k+1]||!c[k+1]->pColor||!c[k]->pFlow[2]||!c[k]->pStats) break;
+                count++;
+            }
+            s.srHistoryFrames=std::max(s.srHistoryFrames,count);
+            if(count!=4) continue;
+            for(uint32_t k=0;k<4;k++) {
+                if(c[k]->ulID!=s.srTargetID || (s.srTargetPhase<0.999f&&k==3)) continue;
+                for(uint32_t j=0;j<4;j++) chain[j]=c[j];
+                anchor=k;newest=end.ulID;break;
+            }
+        }
+        if(!chain[0]) return false;
         if ( !s.pSrInverseOutput )
             s.pSrInverseOutput=CreateImage(1280,800,KFG_FORMAT_RGBA8);
         if ( !s.pSrInverseOutput )
@@ -921,16 +959,21 @@ namespace kfg
         kfg_params p={};
         p.dst_size[0]=1280; p.dst_size[1]=800;
         p.src_size[0]=1024; p.src_size[1]=640;
-        p.level=KFG_POST_SR_INVERSE;
+        p.level=KFG_POST_SR_INVERSE4;
+        p.flags=int32_t(anchor);p.t=s.srTargetPhase;
         pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_POST));
         pCmd->bindTexture(0,std::move(raw));
         pCmd->bindTexture(1,layer.tex);
-        for(uint32_t slot=0;slot<2;slot++) {
+        for(uint32_t k=0;k<4;k++) pCmd->bindTexture(2+k,chain[k]->pColor.get());
+        for(uint32_t k=0;k<3;k++) {
+            pCmd->bindTexture(6+k,chain[k]->pFlow[2].get());
+            pCmd->bindTexture(9+k,chain[k]->pStats.get());
+        }
+        for(uint32_t slot=0;slot<12;slot++) {
             pCmd->setTextureSrgb(slot,true);
-            pCmd->setSamplerNearest(slot,true);
+            pCmd->setSamplerNearest(slot,slot==1||slot>=9);
             pCmd->setSamplerUnnormalized(slot,false);
         }
-        for(uint32_t slot=2;slot<KFG_MAX_SLOTS;slot++) pCmd->bindTexture(slot,nullptr);
         pCmd->bindTarget(s.pSrInverseOutput.get());
         UploadParams(pCmd,p);
         pCmd->dispatch(1280/5,800/5);
@@ -1062,7 +1105,7 @@ namespace kfg
 		if ( s.uWidth )
 			kfg_analysis_size( s.uWidth, s.uHeight, asz );
 		fprintf( f,
-			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_inverse_active\":%s,\"sr_inverse_frames\":%" PRIu64 ",\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
+			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_inverse_active\":%s,\"sr_inverse_frames\":%" PRIu64 ",\"sr_history_frames\":%u,\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
 			"\"refresh_ns\":%" PRIu64 ",\"width\":%u,\"height\":%u,"
 			"\"paints\":%" PRIu64 ",\"applied\":%" PRIu64 ",\"bypass\":%" PRIu64 ",\"ring_miss\":%" PRIu64 ",\"unsupported\":%" PRIu64 ","
 			"\"sources\":%" PRIu64 ",\"real\":%" PRIu64 ",\"gen\":%" PRIu64 ",\"repeat\":%" PRIu64 ",\"skip\":%" PRIu64 ",\"resync\":%" PRIu64 ",\"degrade\":%" PRIu64 ",\"catchup\":%" PRIu64 ","
@@ -1074,7 +1117,7 @@ namespace kfg
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
-			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", (s.srSelected && s.srInverseActive) ? "true" : "false", s.srInverseFrames, s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
+			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", (s.srSelected && s.srInverseActive) ? "true" : "false", s.srInverseFrames, s.srHistoryFrames, s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1178,6 +1221,7 @@ namespace kfg
 		s.bApplied = false;
 		s.bPostPending = false;
 		s.bPostApplied = false;
+        s.srCaptureOnly = false;
 		PostUpdateConfig( s );
 
 		// Generation needs a fixed vblank grid. Adaptive sync stays off for as long as a
@@ -1272,6 +1316,26 @@ namespace kfg
 		}
 
 		const uint32_t uMult = RequestedMultiplier();
+        // Keep real observations available even when frame generation is off.
+        // This path never runs the FG scheduler or substitutes a generated frame.
+        if(uMult==1 && (!s.bInit||s.sched.state==KFG_STATE_OFF) && s.srSelected &&
+           s.bPostPending && kfg_post_after_generation(&s.post) &&
+           !s.post.grade && !s.post.finish && s.post.aa==KFG_AA_NONE) {
+            if(uAppID!=s.uLastAppID || s.uWidth!=1024 || s.uHeight!=640 || s.nTransfer!=KFG_TRANSFER_SDR) {
+                ResetHistory(s,"SR capture change");
+                ReleaseImages(s);
+                s.uLastAppID=uAppID;s.nTransfer=KFG_TRANSFER_SDR;
+            }
+            if(!EnsureImages(s,1024,640)) { ReleaseImages(s);return; }
+            s.srCaptureOnly=true;
+            s.bNewSource=ulBaseCommitID!=0 && (bNewCommit||!FindFrame(s,ulBaseCommitID));
+            s.ulPendingID=ulBaseCommitID;
+            s.srTargetID=ulBaseCommitID;s.srTargetPhase=1.0f;
+            s.pending={};s.pending.state=KFG_STATE_OFF;
+            s.bPending=true;
+            return;
+        }
+        if(uMult==1&&!s.bInit&&s.uWidth) ReleaseImages(s);
 		if ( !s.bInit )
 		{
 			if ( uMult == 1 )
@@ -1425,6 +1489,7 @@ namespace kfg
 			if ( s.bAnalysisQueued )
 			{
 				RecordPlan( pCmd, s.analysisPlan, r, s.uAnalysisNext );
+                if(auto *done=FindFrame(s,s.srAnalysisFrameID)) done->bAnalysisReady=true;
 				s.bAnalysisQueued = false;
 			}
 			// With filters on, the game's frame is filtered once on its way into the ring: real
@@ -1443,6 +1508,7 @@ namespace kfg
 				tune.interval_ratio = float( cur.ulIntervalNs ) / float( pPrev->ulIntervalNs );
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
+            cur.bAnalysisReady=false;
 			cur.ulPrevID = pPrev ? pPrev->ulID : 0;
 			const uint32_t fb = FrameIndex( s, &cur );
 			const uint32_t fa = pPrev ? FrameIndex( s, pPrev ) : fb;
@@ -1452,9 +1518,20 @@ namespace kfg
 			const int prevPair = pPrev && pPrev->ulPrevID ? int( fa ) : -1;
 			kfg_plan_analyze( &s.analysisPlan, s.uWidth, s.uHeight, fa, fb, fb, pPrev ? 1 : 0, prevPair, &tune );
 			s.bAnalysisQueued = true;
+            s.srAnalysisFrameID=cur.ulID;
 			s.uAnalysisNext = 0;
+            // FG-off has no future vblank reserved for analysis. Complete
+            // this pair before reconstructing the new real frame.
+            if(s.srCaptureOnly) {
+                RecordPlan(pCmd,s.analysisPlan,r);
+                cur.bAnalysisReady=true;
+                s.bAnalysisQueued=false;
+            }
 		}
-
+        if(s.srCaptureOnly) {
+            s.srTargetID=s.ulPendingID;s.srTargetPhase=1.0f;
+            return;
+        }
 		const kfg_decision &d = s.pending;
 		gamescope::Rc<CVulkanTexture> pShow;
 		switch ( d.show )
@@ -1462,8 +1539,10 @@ namespace kfg
 			case KFG_SHOW_REAL:
 			{
 				Frame_t *pA = FindFrame( s, d.src_a );
-				if ( pA )
-					pShow = pA->pColor.get();
+				if ( pA ) {
+                    pShow=pA->pColor.get();
+                    s.srTargetID=pA->ulID;s.srTargetPhase=1.0f;
+                }
 				else
 					s.ulRingMiss++, s.pszLastProblem = "ring_miss_real";
 				break;
@@ -1479,14 +1558,17 @@ namespace kfg
 						kfg_transfer_flags( s.nTransfer ) | ( pB->uResponseHold ? KFG_FLAG_VARIABLE_INTERVAL : 0 ) | ( cv_kfg_debug_marker ? KFG_FLAG_DEBUG_MARKER : 0 ) );
 					RecordPlan( pCmd, plan, r );
 					pShow = s.pOutput[ s.uNextOutput ].get();
+                    s.srTargetID=pB->ulID;s.srTargetPhase=float(d.phase_num)/float(d.phase_den);
 					s.uNextOutput ^= 1u;
 				}
 				else
 				{
 					s.ulRingMiss++;
 					s.pszLastProblem = "ring_miss_pair";
-					if ( pB )
-						pShow = pB->pColor.get();
+					if ( pB ) {
+                        pShow=pB->pColor.get();
+                        s.srTargetID=pB->ulID;s.srTargetPhase=1.0f;
+                    }
 				}
 				break;
 			}
@@ -1502,6 +1584,7 @@ namespace kfg
 		{
 			// Passthrough: the newest commit as Gamescope would show it.
 			s.pLastShown = nullptr;
+            s.srTargetID=s.ulPendingID;s.srTargetPhase=1.0f;
 			return;
 		}
 		layer0.tex = pShow;
@@ -1597,8 +1680,10 @@ namespace kfg
 		}
 		g_device.submit( std::move( pCmd ) );
 		s.uAnalysisNext = uEnd;
-		if ( uEnd >= s.analysisPlan.n )
+		if ( uEnd >= s.analysisPlan.n ) {
+            if(auto *done=FindFrame(s,s.srAnalysisFrameID)) done->bAnalysisReady=true;
 			s.bAnalysisQueued = false;
+        }
 	}
 
 	void OnPresented( bool bPresented )

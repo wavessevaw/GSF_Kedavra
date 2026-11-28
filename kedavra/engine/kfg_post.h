@@ -39,6 +39,7 @@ enum kfg_post_stage {
 	KFG_POST_FXAA = 2,
 	KFG_POST_FINISH = 3,
 	KFG_POST_SR_INVERSE = 4, // host-only 5:4 inverse dispatch (raw + focused input)
+	KFG_POST_SR_INVERSE4 = 5, // four raw observations + bidirectional flow
 };
 
 // Grade effects, in the order they run (bit i = row i of KFG_POST_EFFECTS while stage is grade).

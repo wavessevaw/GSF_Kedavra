@@ -658,6 +658,92 @@ cleanup:
     kfg_vk_image_destroy(vk,&e.post[1]);
 }
 
+
+typedef struct sr4_test_env { kfg_vk_image src[12],out; } sr4_test_env;
+static const kfg_vk_image *sr4_resolve(void *user,kfg_image_ref r)
+{
+    sr4_test_env *e=user;
+    return r.role==KFG_ROLE_COLOR&&r.ring<12?&e->src[r.ring]:
+           r.role==KFG_ROLE_OUTPUT?&e->out:NULL;
+}
+static float sr4_test_box(float a,float b,float pix)
+{
+    return fmaxf(0.0f,fminf(b,pix+1.0f)-fmaxf(a,pix));
+}
+static void test_sr_inverse4(kfg_vk *vk)
+{
+    sr4_test_env e={0};
+    VkFormat rgba=kfg_vk_format(KFG_FORMAT_RGBA8), half=kfg_vk_format(KFG_FORMAT_RGBA16F);
+    enum { W=32,H=32,OW=40,OH=40 };
+    int ok=1;
+    for(int i=0;i<12;i++)
+        if(kfg_vk_image_create(vk,&e.src[i],i<6?rgba:half,i<6?W:i<9?W/4:1,i<6?H:i<9?H/4:1)) { ok=0;break; }
+    if(!ok||kfg_vk_image_create(vk,&e.out,rgba,OW,OH)) { CHECK(0,"SR4 image allocation");goto cleanup; }
+    float gt[OW*OH];
+    uint8_t raw[4][W*H*4], out[OW*OH*4],fallback[OW*OH*4];
+    const int sx[4]={0,1,0,1},sy[4]={0,0,1,1};
+    for(int y=0;y<OH;y++) for(int x=0;x<OW;x++)
+        gt[y*OW+x]=0.5f+0.19f*sinf(1.65f*x+0.23f*y)+0.16f*cosf(1.4f*y-0.3f*x);
+    for(int f=0;f<4;f++) for(int y=0;y<H;y++) for(int x=0;x<W;x++) {
+        float a=x*1.25f-sx[f],b=y*1.25f-sy[f],v=0;
+        for(int yy=(int)floorf(b);yy<=(int)floorf(b+1.25f);yy++)
+            for(int xx=(int)floorf(a);xx<=(int)floorf(a+1.25f);xx++) {
+                int px=xx<0?0:xx>=OW?OW-1:xx,py=yy<0?0:yy>=OH?OH-1:yy;
+                v+=gt[py*OW+px]*sr4_test_box(a,a+1.25f,xx)*sr4_test_box(b,b+1.25f,yy)*0.64f;
+            }
+        int j=4*(y*W+x);
+        raw[f][j]=raw[f][j+1]=raw[f][j+2]=(uint8_t)lroundf(v*255.0f);raw[f][j+3]=255;
+    }
+    for(int i=0;i<6;i++) if(kfg_vk_upload_rgba8(vk,&e.src[i],raw[i<2?0:i-2])) ok=0;
+    // Half-float +/-0.8 source pixels = one HR pixel; each pair stores
+    // older->newer in xy and newer->older in zw.
+    for(int f=0;f<3;f++) {
+        int dx=sx[f+1]-sx[f],dy=sy[f+1]-sy[f];
+        uint16_t flow[(W/4)*(H/4)*4];
+        for(int i=0;i<(W/4)*(H/4);i++) {
+            flow[4*i]=dx>0?0xba66:dx<0?0x3a66:0;
+            flow[4*i+1]=dy>0?0xba66:dy<0?0x3a66:0;
+            flow[4*i+2]=dx>0?0x3a66:dx<0?0xba66:0;
+            flow[4*i+3]=dy>0?0x3a66:dy<0?0xba66:0;
+        }
+        if(kfg_vk_upload_raw(vk,&e.src[6+f],flow,sizeof(flow)))ok=0;
+    }
+    if(!ok) { CHECK(0,"SR4 upload");goto cleanup; }
+    kfg_plan plan={0};
+    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_POST,kfg_ref(KFG_ROLE_OUTPUT,0,0),"SR4 inverse");
+    p->nslots=12;
+    for(int i=0;i<12;i++)p->slots[i]=kfg_ref(KFG_ROLE_COLOR,i,0);
+    p->nearest_mask=(1u<<1)|(7u<<9);
+    p->params.level=KFG_POST_SR_INVERSE4;
+    p->params.dst_size[0]=OW;p->params.dst_size[1]=OH;
+    p->params.src_size[0]=W;p->params.src_size[1]=H;
+    p->params.t=1.0f;p->params.flags=0;p->params.radius=1; // exact registration test only
+    p->groups[0]=OW/5;p->groups[1]=OH/5;
+    for(int mode=0;mode<3;mode++) {
+        // mode 0: a scene cut forces spatial reference; mode 1: four exact
+        // positions; mode 2: runtime registration/rejection path.
+        uint16_t stats[4]={mode==0?0x3c00:0,0,0,0};
+        for(int i=9;i<12;i++) if(kfg_vk_upload_raw(vk,&e.src[i],stats,sizeof(stats)))ok=0;
+        p->params.radius=mode==2?0:1;
+        kfg_vk_begin(vk);
+        if(!ok||kfg_vk_record(vk,&plan,sr4_resolve,&e)||kfg_vk_submit_wait(vk)||
+           kfg_vk_download_rgba8(vk,&e.out,out)) { CHECK(0,"SR4 dispatch");break; }
+        if(mode==0) memcpy(fallback,out,sizeof(out));
+        double err=0,base=0;
+        for(int y=5;y<OH-5;y++)for(int x=5;x<OW-5;x++) {
+            int i=y*OW+x;float d=out[4*i]/255.0f-gt[i],b=fallback[4*i]/255.0f-gt[i];
+            err+=d*d;base+=b*b;
+            CHECK(out[4*i+3]==255,"SR4 alpha");
+        }
+        printf("  SR4 mode %d: SSE %.6f spatial %.6f\n",mode,err,base);
+        if(mode==1) CHECK(err<base*0.9,"four measured lattices must improve over cut fallback");
+        if(mode==2) CHECK(err<base*1.25,"SR4 registration must not substantially worsen reference");
+    }
+cleanup:
+    for(int i=0;i<12;i++)kfg_vk_image_destroy(vk,&e.src[i]);
+    kfg_vk_image_destroy(vk,&e.out);
+}
+
 #include "kfg_post_batch.h"
 
 int main(int argc, char **argv)
@@ -696,6 +782,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	test_sr_inverse(&vk);
+    test_sr_inverse4(&vk);
 	printf("colour looks against the CPU reference\n");
 	const struct { const char *name; ref_fn fn; float tol; } PW[] = {
 		{ "levels_plus", r_levels, 1.0f }, { "curves", r_curves, 1.0f }, { "vibrance", r_vibrance, 1.0f },
