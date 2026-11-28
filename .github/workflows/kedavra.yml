@@ -5,7 +5,7 @@ name: KEDAVRA
 # Steam Deck measurements.
 on:
   push:
-    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2, test/courtyard-3, test/courtyard-4, test/focus-dark-detail, release/1.8.0, research/native-sr]
+    branches: [research/detail-reconstruction, release/1.6.0, integration/gfg-3.4.1, rework/benchmark-ui, release/1.7.0, test/90hz-response-2, test/courtyard-1, test/courtyard-2, test/courtyard-3, test/courtyard-4, test/focus-dark-detail, release/1.8.0, research/native-sr, experiment/native-sr-2-test]
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
   pull_request:
     paths: ['kedavra/**', '.github/workflows/kedavra.yml']
@@ -145,7 +145,7 @@ jobs:
           nm -C /tmp/gamescope/build/src/gamescope | grep -c 'kfg::'
       - name: Bundle with its libraries
         run: |
-          sh kedavra/gamescope/bundle.sh /tmp/gamescope/build gamescope-runtime "kedavra-1.9.0-sr.1-${GITHUB_SHA::7}"
+          sh kedavra/gamescope/bundle.sh /tmp/gamescope/build gamescope-runtime "kedavra-1.9.0-sr.2-${GITHUB_SHA::7}"
           cat gamescope-runtime/LIBS
       - name: Bundled runtime resolves from its install location
         run: |
@@ -209,15 +209,15 @@ jobs:
           path: deck-bench
       - name: Full install candidate with runtime, research bench and rollback instructions
         run: |
-          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.9.0-sr.1.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
-          sha256sum GSF-Kedavra-1.9.0-sr.1.zip > GSF-Kedavra-1.9.0-sr.1.zip.sha256
+          sh kedavra/decky/package.sh "$PWD/GSF-Kedavra-1.9.0-sr.2.zip" "$PWD/gamescope-runtime" "$PWD/deck-bench"
+          sha256sum GSF-Kedavra-1.9.0-sr.2.zip > GSF-Kedavra-1.9.0-sr.2.zip.sha256
           cp README-1.8.0.md README-Detail-Candidate.md
       - uses: actions/upload-artifact@v4
         with:
           name: GSF-Kedavra-Detail-Candidate
           path: |
-            GSF-Kedavra-1.9.0-sr.1.zip
-            GSF-Kedavra-1.9.0-sr.1.zip.sha256
+            GSF-Kedavra-1.9.0-sr.2.zip
+            GSF-Kedavra-1.9.0-sr.2.zip.sha256
             README-Detail-Candidate.md
 
   detail-lab:
@@ -334,11 +334,43 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd out
-          zip=GSF-Kedavra-1.9.0-sr.1.zip
+          zip=GSF-Kedavra-1.9.0-sr.2.zip
           sha256sum -c "$zip.sha256"
           unzip -tq "$zip"
           test "$(unzip -p "$zip" KEDAVRA/package.json | jq -r .version)" = 1.8.0
-          test "$(unzip -p "$zip" KEDAVRA/runtime/VERSION)" = "kedavra-1.9.0-sr.1-${GITHUB_SHA::7}"
+          test "$(unzip -p "$zip" KEDAVRA/runtime/VERSION)" = "kedavra-1.9.0-sr.2-${GITHUB_SHA::7}"
           unzip -p "$zip" KEDAVRA/dist/index.js > "$RUNNER_TEMP/plugin.js"
           grep -Fq '1.8.0' "$RUNNER_TEMP/plugin.js"
           gh release create v1.8.0 "$zip" "$zip.sha256" ../README-1.8.0.md --target "$GITHUB_SHA" --title 'GSF Kedavra 1.8.0' --notes-file ../README-1.8.0.md --latest
+
+  gfg-native-sr2:
+    if: github.ref == 'refs/heads/experiment/native-sr-2-test'
+    needs: [model-and-engine, gamescope, runtime-on-older-glibc]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: wavessevaw/GFG-Extreme
+          ref: e53988a21644c68ee9e073621d4623fd68c213a4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gamescope-runtime
+          path: runtime-build
+      - uses: actions/download-artifact@v4
+        with:
+          name: kedavra-deck-bench
+          path: bench-build
+      - name: Verify controller and package SR.2
+        run: |
+          python3 -m unittest discover -s tests
+          test "$(cat runtime-build/VERSION)" = "kedavra-1.9.0-sr.2-${GITHUB_SHA::7}"
+          bash scripts/build_release.sh 4.0.0-sr.2 "$PWD/runtime-build" "$PWD/out" "$PWD/bench-build"
+          cd out
+          sha256sum -c SHA256SUMS.txt
+          unzip -tq *.zip
+          cmp <(unzip -p *.zip GFG-Extreme/runtime/bin/gamescope) ../runtime-build/bin/gamescope
+          cmp <(unzip -p *.zip GFG-Extreme/bench/kfg_post.spv) ../bench-build/kfg_post.spv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GFG-Extreme-Native-SR-2
+          path: out/

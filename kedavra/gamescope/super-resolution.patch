@@ -70,7 +70,7 @@ index 7f3645e..1a5dae4 100644
 +        // Gamescope expresses the origin at the centre of the first source
 +        // texel. SR maps the centre of each destination pixel into that grid.
 +        vec2 sourceCenter = coord + 0.5 * (u_scale[offsetLayerIdx] - vec2(1.0));
-+        color = kfgReconstruct(layerSampler, sourceCenter, ivec2(texSize));
++        color = kfgReconstruct(layerSampler, sourceCenter, ivec2(texSize), all(lessThan(abs(u_scale[offsetLayerIdx] - vec2(0.8)), vec2(0.0001))));
 +        color.rgb = colorspace_plane_degamma_tf(color.rgb, colorspace);
 +    }
 +    else if (get_layer_shaderfilter(offsetLayerIdx) == filter_pixel) {

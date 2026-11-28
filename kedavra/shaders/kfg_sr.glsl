@@ -13,7 +13,7 @@ vec3 srSlope(vec3 a, vec3 b, vec3 c, vec3 d, float t)
     return 0.5*t*(1.0-t)*((1.0-t)*(2.0*b-a-c) + t*(2.0*c-b-d));
 }
 
-vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size)
+vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size, bool phase54)
 {
     vec2 p = coord-0.5;
     ivec2 i = ivec2(floor(p)), hi = size-1;
@@ -46,5 +46,26 @@ vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size)
     float trust = abs(ad-bc)/(ad+bc+0.015);
     float joint = ad < bc ? min(f.x,f.y) : max(f.x+f.y-1.0,0.0);
     vec3 diagonal = (joint-f.x*f.y)*(a.rgb-b.rgb-c.rgb+d.rgb);
-    return vec4(clamp(base.rgb + mix(hx+hy, diagonal, trust*trust) + clamp(0.18*curvature,-limit,limit),lo,top),base.a);
+    // The original 12-tap path is retained for all other scale ratios.
+    if (!phase54)
+        return vec4(clamp(base.rgb + mix(hx+hy, diagonal, trust*trust) + clamp(0.18*curvature,-limit,limit),lo,top),base.a);
+
+    // Low-cost phase-dependent residual on the existing stencil.
+    // 5:4 coefficients fitted on synthetic photo downsampling only; experimental.
+    vec3 cx = mix(mix(2.0*a.rgb-leftA-b.rgb,2.0*b.rgb-a.rgb-rightB,f.x),
+                  mix(2.0*c.rgb-leftC-d.rgb,2.0*d.rgb-c.rgb-rightD,f.x),f.y);
+    vec3 cy = mix(mix(2.0*a.rgb-upA-c.rgb,2.0*b.rgb-upB-d.rgb,f.x),
+                  mix(2.0*c.rgb-a.rgb-downC,2.0*d.rgb-b.rgb-downD,f.x),f.y);
+    vec2 phase = f*(1.0-f);
+    vec3 residual = 0.022116*curvature + 0.699988*(phase.x*cx+phase.y*cy);
+    vec3 bound = 0.168153*(top-lo);
+    vec3 rgb = base.rgb + mix(0.342317*(hx+hy),diagonal,0.915944*trust*trust)
+                        + clamp(residual,-bound,bound);
+    return vec4(clamp(rgb,lo,top),base.a);
+}
+
+// Standalone SR replay uses the candidate; production passes the actual scale.
+vec4 kfgReconstruct(sampler2D tex, vec2 coord, ivec2 size)
+{
+    return kfgReconstruct(tex,coord,size,true);
 }

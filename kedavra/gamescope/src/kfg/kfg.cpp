@@ -74,7 +74,7 @@ namespace kfg
 			SrRequest request{};
 			if (sscanf(cv.Get().c_str(), "%u:%u:%u%c", &app, &height, &launch, &extra) == 3 &&
 			    app && app != 769 && (height == 480 || height == 500 || height == 540 ||
-			    height == 600 || height == 720 || height == 800))
+			    height == 600 || height == 640 || height == 720 || height == 800))
 				request = {app, height, launch, get_time_in_nanos() + 20000000000ull};
 			std::scoped_lock lock(g_CvarMutex);
 			g_sr = request;
