@@ -182,6 +182,9 @@ namespace kfg
 		uint32_t uAnalysisPixels = 0;  // kfg_analysis_pixels the images were made for
 		uint32_t srWidth = 0, srHeight = 0, srOutputWidth = 0, srOutputHeight = 0;
 		bool srSelected = false;
+        bool srInverseActive = false;
+        uint64_t srInverseFrames = 0;
+        gamescope::OwningRc<CVulkanTexture> pSrInverseOutput;
 		uint32_t srManagedApp = 0;
 		int srVirtualWidth = 0, srVirtualHeight = 0;
 		uint32_t uPaintAppID = 0;  // app id of the base plane at the last paint (diagnostics)
@@ -897,6 +900,49 @@ namespace kfg
 		return true;
 	}
 
+
+    // SR.4: keep raw observations and Focus prior separate. Only the exact fullscreen
+    // 5:4 SDR path, with no other post effects, is eligible. Allocation failure falls
+    // back to the original composite's spatial filter without changing geometry.
+    static bool RecordSrInverse( CVulkanCmdBuffer *pCmd, State_t &s,
+                                 FrameInfo_t::Layer_t &layer, gamescope::Rc<CVulkanTexture> raw )
+    {
+        if ( !s.srSelected || !raw || !layer.tex || raw->width()!=1024 || raw->height()!=640 ||
+             layer.tex->width()!=1024 || layer.tex->height()!=640 ||
+             std::abs(layer.offset.x)>0.0001f || std::abs(layer.offset.y)>0.0001f ||
+             layer.opacity<0.999f || !kfg_post_after_generation(&s.post) ||
+             s.post.grade || s.post.finish || s.post.aa!=KFG_AA_NONE ||
+             SourceTransfer(layer)!=KFG_TRANSFER_SDR )
+            return false;
+        if ( !s.pSrInverseOutput )
+            s.pSrInverseOutput=CreateImage(1280,800,KFG_FORMAT_RGBA8);
+        if ( !s.pSrInverseOutput )
+            return false;
+        kfg_params p={};
+        p.dst_size[0]=1280; p.dst_size[1]=800;
+        p.src_size[0]=1024; p.src_size[1]=640;
+        p.level=KFG_POST_SR_INVERSE;
+        pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_POST));
+        pCmd->bindTexture(0,std::move(raw));
+        pCmd->bindTexture(1,layer.tex);
+        for(uint32_t slot=0;slot<2;slot++) {
+            pCmd->setTextureSrgb(slot,true);
+            pCmd->setSamplerNearest(slot,true);
+            pCmd->setSamplerUnnormalized(slot,false);
+        }
+        for(uint32_t slot=2;slot<KFG_MAX_SLOTS;slot++) pCmd->bindTexture(slot,nullptr);
+        pCmd->bindTarget(s.pSrInverseOutput.get());
+        UploadParams(pCmd,p);
+        pCmd->dispatch(1280/5,800/5);
+        // Final Gamescope composite sees a native-sized layer, and does transfer decode once.
+        layer.tex=s.pSrInverseOutput.get();
+        layer.scale={1.0f,1.0f};
+        layer.filter=GamescopeUpscaleFilter::LINEAR;
+        s.srInverseActive=true;
+        s.srInverseFrames++;
+        return true;
+    }
+
 	// JSON string content: quotes, backslashes and control characters become '?'.
 	static std::string JsonSafe( const std::string &str )
 	{
@@ -1016,7 +1062,7 @@ namespace kfg
 		if ( s.uWidth )
 			kfg_analysis_size( s.uWidth, s.uHeight, asz );
 		fprintf( f,
-			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
+			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_inverse_active\":%s,\"sr_inverse_frames\":%" PRIu64 ",\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
 			"\"refresh_ns\":%" PRIu64 ",\"width\":%u,\"height\":%u,"
 			"\"paints\":%" PRIu64 ",\"applied\":%" PRIu64 ",\"bypass\":%" PRIu64 ",\"ring_miss\":%" PRIu64 ",\"unsupported\":%" PRIu64 ","
 			"\"sources\":%" PRIu64 ",\"real\":%" PRIu64 ",\"gen\":%" PRIu64 ",\"repeat\":%" PRIu64 ",\"skip\":%" PRIu64 ",\"resync\":%" PRIu64 ",\"degrade\":%" PRIu64 ",\"catchup\":%" PRIu64 ","
@@ -1028,7 +1074,7 @@ namespace kfg
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
-			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
+			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", (s.srSelected && s.srInverseActive) ? "true" : "false", s.srInverseFrames, s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1502,8 +1548,11 @@ namespace kfg
 			RecordGenerate( pCmd, s, layer0 );
 		if ( oQuery )
 			g_device.vk.CmdWriteTimestamp( pCmd->rawBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queryPool, *oQuery * k_uTimingQueries + 1 );
-		if ( bPost && !s.bShownFiltered )
-			RecordPost( pCmd, s, layer0 );
+		s.srInverseActive=false;
+		if ( bPost && !s.bShownFiltered ) {
+            auto raw = layer0.tex;
+            if (RecordPost(pCmd,s,layer0)) RecordSrInverse(pCmd,s,layer0,std::move(raw));
+        }
 		if ( oQuery )
 		{
 			g_device.vk.CmdWriteTimestamp( pCmd->rawBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queryPool, *oQuery * k_uTimingQueries + 2 );

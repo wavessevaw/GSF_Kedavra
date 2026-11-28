@@ -27,7 +27,7 @@ detail-lab: all
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/%.spv: shaders/%.comp shaders/kfg_common.glsl shaders/kfg_smaa.glsl shaders/smaa/SMAA.hlsl | $(BUILD)
+$(BUILD)/%.spv: shaders/%.comp shaders/kfg_common.glsl shaders/kfg_sr.glsl shaders/kfg_smaa.glsl shaders/smaa/SMAA.hlsl | $(BUILD)
 	$(GLSLANG) -V --target-env vulkan1.1 -Ishaders -o $@ $<
 
 $(BUILD)/kfg_sim: sched/kfg_sim.c sched/kfg_sched.h | $(BUILD)

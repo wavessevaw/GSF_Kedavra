@@ -606,6 +606,58 @@ static const struct { const char *name, *spec; } PRESETS[] = {
 			"bleach_bypass,sepia,noir,monochrome,nostalgia,dls=0.5:0.17,smaa,chromatic_aberration,vignette,film_grain" },
 };
 
+
+static void test_sr_inverse(kfg_vk *vk)
+{
+    post_env e={0};
+    e.vk=vk; e.w=e.h=16;
+    VkFormat fmt=kfg_vk_format(KFG_FORMAT_RGBA8);
+    if (kfg_vk_image_create(vk,&e.in,fmt,16,16) ||
+        kfg_vk_image_create(vk,&e.post[0],fmt,16,16) ||
+        kfg_vk_image_create(vk,&e.post[1],fmt,20,20)) {
+        CHECK(0,"SR inverse image allocation");
+        goto cleanup;
+    }
+    uint8_t raw[16*16*4], prior[16*16*4], out[20*20*4];
+    kfg_plan plan={0};
+    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_POST,kfg_ref(KFG_ROLE_POST,1,0),"SR inverse");
+    p->nslots=2;
+    p->slots[0]=kfg_ref(KFG_ROLE_POST_IN,0,0);
+    p->slots[1]=kfg_ref(KFG_ROLE_POST,0,0);
+    p->nearest_mask=3;
+    p->params.level=KFG_POST_SR_INVERSE;
+    p->params.dst_size[0]=p->params.dst_size[1]=20;
+    p->params.src_size[0]=p->params.src_size[1]=16;
+    p->groups[0]=p->groups[1]=4;
+    for(int mode=0;mode<3;mode++) {
+        fill_flat(raw,16,16,mode?128:96,mode?128:96,mode?128:96);
+        fill_flat(prior,16,16,96,96,96);
+        if(mode==2) raw[3]=0;
+        if(kfg_vk_upload_rgba8(vk,&e.in,raw)||kfg_vk_upload_rgba8(vk,&e.post[0],prior)) {
+            CHECK(0,"SR inverse upload"); break;
+        }
+        kfg_vk_begin(vk);
+        if(kfg_vk_record(vk,&plan,resolve,&e)||kfg_vk_submit_wait(vk)||kfg_vk_download_rgba8(vk,&e.post[1],out)) {
+            CHECK(0,"SR inverse GPU dispatch"); break;
+        }
+        int lo=255,hi=0;
+        for(int i=0;i<20*20;i++) {
+            int c=out[4*i];
+            if(c<lo)lo=c;
+            if(c>hi)hi=c;
+            CHECK(out[4*i+3]==255,"SR inverse preserves alpha");
+            if(mode==0) CHECK(abs(c-96)<=1,"SR inverse flat identity");
+            if(mode==2 && i%20<5 && i/20<5) CHECK(abs(c-96)<=1,"SR inverse rejects nonopaque tile");
+        }
+        if(mode==1) CHECK(lo>96 && hi<=135,"SR inverse measured correction (%d..%d)",lo,hi);
+        printf("  SR inverse mode %d: range %d..%d\n",mode,lo,hi);
+    }
+cleanup:
+    kfg_vk_image_destroy(vk,&e.in);
+    kfg_vk_image_destroy(vk,&e.post[0]);
+    kfg_vk_image_destroy(vk,&e.post[1]);
+}
+
 #include "kfg_post_batch.h"
 
 int main(int argc, char **argv)
@@ -643,6 +695,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "post images failed\n");
 		return 1;
 	}
+	test_sr_inverse(&vk);
 	printf("colour looks against the CPU reference\n");
 	const struct { const char *name; ref_fn fn; float tol; } PW[] = {
 		{ "levels_plus", r_levels, 1.0f }, { "curves", r_curves, 1.0f }, { "vibrance", r_vibrance, 1.0f },
