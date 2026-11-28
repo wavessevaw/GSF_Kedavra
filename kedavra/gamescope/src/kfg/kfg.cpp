@@ -1316,7 +1316,19 @@ namespace kfg
 		if (pFrameInfo->layers.count()) {
 			auto &base = pFrameInfo->layers.get(0);
 			const auto sr = SuperResolutionRequest();
-            if(sr.app!=s.srBudgetApp) {s.srBudgetApp=sr.app;s.srBudgetTrips=0;s.srBudgetUntilNs=0;s.srLastBuildSource=0;}
+            if (sr.app != s.srBudgetApp) {
+                // A disabled lease or a different game cannot consume these anchors.
+                for (auto &frame : s.frames) {
+                    frame.srCacheID = 0;
+                    frame.pSrDetail = nullptr;
+                }
+                s.pSrAnchorFocus = nullptr;
+                s.pSrInverseOutput = nullptr;
+                s.srBudgetApp = sr.app;
+                s.srBudgetTrips = 0;
+                s.srBudgetUntilNs = 0;
+                s.srLastBuildSource = 0;
+            }
 			if (base.tex) {
 				s.srWidth = base.tex->width();
 				s.srHeight = base.tex->height();
