@@ -1157,8 +1157,9 @@ namespace kfg
 				// Use the compositor's actual scale and offset for the game layer.
 				s.srSelected = sr.app && sr.app == uAppID && !pFrameInfo->blurLayer0 &&
 					!pFrameInfo->bFadingOut && SourceTransfer(base) == KFG_TRANSFER_SDR &&
-					!base.isYcbcr() && base.scale.x >= 0.599f && base.scale.y >= 0.599f &&
-					base.scale.x < 0.999f && base.scale.y < 0.999f;
+					!base.isYcbcr() && s.srWidth == 1024 && s.srHeight == 640 &&
+                    outputWidth == 1280 && outputHeight == 800 &&
+                    std::abs(base.scale.x - 0.8f) < 0.0001f && std::abs(base.scale.y - 0.8f) < 0.0001f;
 				if (s.srSelected) {
 					base.filter = GamescopeUpscaleFilter::KEDAVRA;
 					pFrameInfo->useFSRLayer0 = pFrameInfo->useNISLayer0 = pFrameInfo->useSGSRLayer0 = false;
