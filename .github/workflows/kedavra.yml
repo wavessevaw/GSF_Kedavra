@@ -351,7 +351,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: wavessevaw/GFG-Extreme
-          ref: e3268933ad4b162bac8c8d28d9977a26370fce67
+          ref: 7afab9a9e6024a9741a864afd9ff43da4612f2f7
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

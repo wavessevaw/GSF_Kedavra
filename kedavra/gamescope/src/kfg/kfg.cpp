@@ -912,7 +912,7 @@ namespace kfg
 	}
 
 
-    // SR.4: keep raw observations and Focus prior separate. Only the exact fullscreen
+    // SR.5: four real observations and Focus prior remain separate. Only the exact fullscreen
     // 5:4 SDR path, with no other post effects, is eligible. Allocation failure falls
     // back to the original composite's spatial filter without changing geometry.
     static bool RecordSrInverse( CVulkanCmdBuffer *pCmd, State_t &s,
@@ -1328,7 +1328,8 @@ namespace kfg
             }
             if(!EnsureImages(s,1024,640)) { ReleaseImages(s);return; }
             s.srCaptureOnly=true;
-            s.bNewSource=ulBaseCommitID!=0 && (bNewCommit||!FindFrame(s,ulBaseCommitID));
+            s.bNewSource=ulBaseCommitID!=0 && !FindFrame(s,ulBaseCommitID);
+            s.ulLastCommitID=ulBaseCommitID;
             s.ulPendingID=ulBaseCommitID;
             s.srTargetID=ulBaseCommitID;s.srTargetPhase=1.0f;
             s.pending={};s.pending.state=KFG_STATE_OFF;
