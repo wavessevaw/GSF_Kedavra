@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Fast output-phase reconstruction: spatial Focus prior plus cached signed
+// residuals from real anchors. Never runs the inverse or motion search.
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "kfg_common.glsl"
+#include "kfg_sr.glsl"
+layout(local_size_x=8,local_size_y=8) in;
+const vec3 LUMA709=vec3(0.2126,0.7152,0.0722);
+bool inside(vec2 q) { return all(greaterThanEqual(q,vec2(0)))&&all(lessThanEqual(q,vec2(u_srcSize)-1.0)); }
+float residual(vec4 e) { return (e.r*255.0-128.0)/635.0; }
+float matchWeight(vec3 a,vec3 b) {
+    return 1.0-smoothstep(0.035,0.14,dot(abs(a-b),LUMA709));
+}
+vec4 selection(vec2 p) {
+    vec2 grid=vec2(textureSize(s_samplers[3],0));
+    return textureLod(s_samplers[3],(p+0.5)/grid,0.0);
+}
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(p,u_dstSize))) return;
+    vec2 q=(vec2(p)+0.5)*0.8-0.5;
+    vec4 prior=kfgReconstruct(s_samplers[0],q+0.5,u_srcSize,true);
+    float corr=0.0;
+    bool hasB=(u_flags&1)!=0,hasA=(u_flags&2)!=0;
+    if(prior.a>=0.999) {
+        if(u_t>=0.999) {
+            if(hasB) corr=residual(texelFetch(s_samplers[1],p,0));
+        } else if(texelFetch(s_samplers[4],ivec2(0),0).x<=0.5) {
+            vec2 bp=(q+0.5)*0.25-0.5;
+            vec2 v0=selection(bp).xy;
+            vec4 sel=selection(bp-(u_t-0.5)*0.25*v0);
+            vec2 v=sel.xy;
+            vec2 pa=q-u_t*v,pb=q+(1.0-u_t)*v;
+            vec2 uv=(q+0.5)/vec2(u_srcSize);
+            vec3 ref=textureLod(s_samplers[7],uv,0.0).rgb;
+            // Do not move screen-fixed HUD strokes with the background.
+            vec3 a0=textureLod(s_samplers[6],uv,0.0).rgb;
+            vec3 b0=textureLod(s_samplers[5],uv,0.0).rgb;
+            if(dot(abs(a0-b0),LUMA709)<0.008&&dot(abs(ref-a0),LUMA709)<0.008) pa=pb=q;
+            vec2 ua=(pa+0.5)/vec2(u_srcSize),ub=(pb+0.5)/vec2(u_srcSize);
+            float wb=u_t*sel.z/max((1.0-u_t)*(1.0-sel.z)+u_t*sel.z,1e-6);
+            float confidence=1.0-smoothstep(0.08,0.19,sel.w);
+            if(hasB&&inside(pb)) {
+                vec3 b=textureLod(s_samplers[5],ub,0.0).rgb;
+                corr+=wb*matchWeight(ref,b)*residual(textureLod(s_samplers[1],ub,0.0));
+            }
+            if(hasA&&inside(pa)) {
+                vec3 a=textureLod(s_samplers[6],ua,0.0).rgb;
+                corr+=(1.0-wb)*matchWeight(ref,a)*residual(textureLod(s_samplers[2],ua,0.0));
+            }
+            corr*=confidence;
+        }
+    }
+    imageStore(dst,p,vec4(clamp(prior.rgb+vec3(clamp(corr,-0.18,0.18)),0.0,1.0),prior.a));
+}

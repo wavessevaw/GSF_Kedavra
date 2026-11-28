@@ -53,12 +53,15 @@ enum kfg_shader {
 	KFG_SHADER_SMAA_EDGE,
 	KFG_SHADER_SMAA_WEIGHT,
 	KFG_SHADER_SMAA_BLEND,
+	KFG_SHADER_SR_INVERSE,
+	KFG_SHADER_SR_MERGE,
 	KFG_SHADER_COUNT
 };
 
 static const char *const kfg_shader_names[KFG_SHADER_COUNT] = {
 	"kfg_reduce", "kfg_me", "kfg_stats", "kfg_select", "kfg_warp",
 	"kfg_post", "kfg_smaa_edge", "kfg_smaa_weight", "kfg_smaa_blend",
+	"kfg_sr_inverse", "kfg_sr_merge",
 };
 
 // Image roles. Ring-indexed roles carry the ring index in kfg_image_ref.ring.

@@ -114,6 +114,8 @@ namespace kfg
 		uint64_t ulPrevID = 0;      // the frame the pair analysis of this one used; 0 = none
 		bool bValid = false;
         bool bAnalysisReady = false;
+        uint64_t srCacheID = 0;
+        gamescope::OwningRc<CVulkanTexture> pSrDetail;
 		gamescope::OwningRc<CVulkanTexture> pColor;
 		gamescope::OwningRc<CVulkanTexture> pLuma[ KFG_LEVELS + 1 ];
 		gamescope::OwningRc<CVulkanTexture> pFlow[ KFG_LEVELS + 1 ];  // pair (ulPrevID, ulID)
@@ -189,7 +191,11 @@ namespace kfg
         float srTargetPhase = 1.0f;
         uint32_t srHistoryFrames = 0;
         uint64_t srInverseFrames = 0;
-        gamescope::OwningRc<CVulkanTexture> pSrInverseOutput;
+        gamescope::OwningRc<CVulkanTexture> pSrInverseOutput, pSrAnchorFocus;
+        uint64_t srCacheBuilds=0, srLastBuildSource=0, srBudgetUntilNs=0;
+        uint32_t srBudgetApp=0, srBudgetTrips=0;
+        bool srQueryUsed[k_uTimingSlots]={};
+        uint32_t srQueryApp[k_uTimingSlots]={};
 		uint32_t srManagedApp = 0;
 		int srVirtualWidth = 0, srVirtualHeight = 0;
 		uint32_t uPaintAppID = 0;  // app id of the base plane at the last paint (diagnostics)
@@ -410,6 +416,8 @@ namespace kfg
 			case KFG_SHADER_STATS:  return SHADER_TYPE_KFG_STATS;
 			case KFG_SHADER_SELECT: return SHADER_TYPE_KFG_SELECT;
 			case KFG_SHADER_POST:        return SHADER_TYPE_KFG_POST;
+            case KFG_SHADER_SR_INVERSE: return SHADER_TYPE_KFG_SR_INVERSE;
+            case KFG_SHADER_SR_MERGE: return SHADER_TYPE_KFG_SR_MERGE;
 			case KFG_SHADER_SMAA_EDGE:   return SHADER_TYPE_KFG_SMAA_EDGE;
 			case KFG_SHADER_SMAA_WEIGHT: return SHADER_TYPE_KFG_SMAA_WEIGHT;
 			case KFG_SHADER_SMAA_BLEND:  return SHADER_TYPE_KFG_SMAA_BLEND;
@@ -489,6 +497,7 @@ namespace kfg
 		s.bAnalysisQueued = false;
         s.srTargetID = s.srAnalysisFrameID = 0;
         s.srHistoryFrames = 0; s.srInverseActive = false;
+        s.srLastBuildSource=0; s.pSrInverseOutput=nullptr; s.pSrAnchorFocus=nullptr;
 		s.uWidth = s.uHeight = 0;
 	}
 
@@ -563,12 +572,14 @@ namespace kfg
 		{
 			f.bValid = false;
             f.bAnalysisReady = false;
+            f.srCacheID=0;
 			f.ulPrevID = 0;
 		}
 		s.pLastShown = nullptr;
         s.bAnalysisQueued = false;
         s.srTargetID = s.srAnalysisFrameID = 0;
         s.srHistoryFrames = 0; s.srInverseActive = false;
+        s.srLastBuildSource=0;
 		if ( s.bInit )
 			kfg_sched_reset_history( &s.sched );
 		s.ulLastCommitID = 0;
@@ -661,6 +672,15 @@ namespace kfg
 				s.flPostUsSum += flPostUs;
 				s.ulPostSamples++;
 			}
+			if(s.srQueryUsed[uSlot] && s.srBudgetApp && s.srQueryApp[uSlot]==s.srBudgetApp) {
+                // Protect generation first. Use the existing per-composite GPU budget.
+                double cap=std::max(1000.0,double(cv_kfg_budget_us.Get()));
+                if(flUs>cap) {
+                    s.srBudgetTrips=std::min(s.srBudgetTrips+1u,4u);
+                    s.srBudgetUntilNs=get_time_in_nanos()+(2000000000ull<<s.srBudgetTrips);
+                }
+            }
+            s.srQueryUsed[uSlot]=false;
 			s.flGpuUsLast = flUs;
 			s.flGpuUsMax = std::max( s.flGpuUsMax, flUs );
 			s.flGpuUsSum += flUs;
@@ -772,6 +792,8 @@ namespace kfg
 			return;
 		const bool bWasAfter = kfg_post_after_generation( &s.post );
 		s.sPostSpec = sSpec;
+        for(auto &f:s.frames) f.srCacheID=0;
+        s.srLastBuildSource=0;
 		char szErr[ 128 ];
 		if ( kfg_post_parse( sSpec.c_str(), &s.post, szErr, sizeof( szErr ) ) != 0 )
 		{
@@ -915,24 +937,30 @@ namespace kfg
     // SR.5: four real observations and Focus prior remain separate. Only the exact fullscreen
     // 5:4 SDR path, with no other post effects, is eligible. Allocation failure falls
     // back to the original composite's spatial filter without changing geometry.
-    static bool RecordSrInverse( CVulkanCmdBuffer *pCmd, State_t &s,
-                                 FrameInfo_t::Layer_t &layer, gamescope::Rc<CVulkanTexture> raw )
+    static void SrBind( CVulkanCmdBuffer *cmd, uint32_t slot, gamescope::Rc<CVulkanTexture> tex, bool nearest=false )
     {
-        if ( !s.srSelected || !raw || !layer.tex || raw->width()!=1024 || raw->height()!=640 ||
-             layer.tex->width()!=1024 || layer.tex->height()!=640 ||
-             std::abs(layer.offset.x)>0.0001f || std::abs(layer.offset.y)>0.0001f ||
-             layer.opacity<0.999f || !kfg_post_after_generation(&s.post) ||
-             s.post.grade || s.post.finish || s.post.aa!=KFG_AA_NONE ||
-             SourceTransfer(layer)!=KFG_TRANSFER_SDR )
-            return false;
-        // A complete, already submitted chain containing the displayed real
-        // anchor (or generated pair's B) is mandatory. The six-slot ring
-        // allows four ready frames even while the newest pair is in flight.
-        Frame_t *chain[4] = {};
+        cmd->bindTexture(slot,std::move(tex));
+        cmd->setTextureSrgb(slot,true);
+        cmd->setSamplerNearest(slot,nearest);
+        cmd->setSamplerUnnormalized(slot,false);
+    }
+
+    static bool SrCacheReady(const Frame_t *f)
+    {
+        return f && f->bValid && f->pSrDetail && f->srCacheID==f->ulID;
+    }
+
+    static bool RecordSrCache( CVulkanCmdBuffer *pCmd, State_t &s, Frame_t &target,
+                              FrameInfo_t::Layer_t &layer )
+    {
+        if(SrCacheReady(&target)) return true;
+        // Never rebuild for x2/x3 phases or repeat frames, and at most one
+        // heavy dispatch during a source interval.
+        if(!s.ulPendingID || s.srLastBuildSource==s.ulPendingID) return false;
+        Frame_t *chain[4]={};
         uint32_t anchor=0;
         uint64_t newest=0;
         s.srHistoryFrames=0;
-        if(!s.srTargetID) return false;
         for(Frame_t &end:s.frames) {
             if(!end.bValid || end.ulID<=newest) continue;
             Frame_t *c[4]={&end,nullptr,nullptr,nullptr};
@@ -945,44 +973,92 @@ namespace kfg
             }
             s.srHistoryFrames=std::max(s.srHistoryFrames,count);
             if(count!=4) continue;
-            for(uint32_t k=0;k<4;k++) {
-                if(c[k]->ulID!=s.srTargetID || (s.srTargetPhase<0.999f&&k==3)) continue;
+            for(uint32_t k=0;k<4;k++) if(c[k]->ulID==target.ulID) {
                 for(uint32_t j=0;j<4;j++) chain[j]=c[j];
                 anchor=k;newest=end.ulID;break;
             }
         }
         if(!chain[0]) return false;
-        if ( !s.pSrInverseOutput )
-            s.pSrInverseOutput=CreateImage(1280,800,KFG_FORMAT_RGBA8);
-        if ( !s.pSrInverseOutput )
-            return false;
+        if(!target.pSrDetail) target.pSrDetail=CreateImage(1280,800,KFG_FORMAT_RGBA8);
+        if(!target.pSrDetail) return false;
+        gamescope::Rc<CVulkanTexture> focused=layer.tex;
+        if(s.srTargetPhase<0.999f) {
+            // Generated content is not a measurement or an inverse prior.
+            // Focus the actual anchor into a separate reusable scratch image.
+            if(!s.pSrAnchorFocus) s.pSrAnchorFocus=CreateImage(1024,640,KFG_FORMAT_RGBA8);
+            if(!s.pSrAnchorFocus) return false;
+            kfg_params fp={};
+            fp.dst_size[0]=fp.src_size[0]=1024;fp.dst_size[1]=fp.src_size[1]=640;
+            fp.level=KFG_POST_SHARPEN;fp.flags=KFG_SHARPEN_DETAIL;fp.lambda=s.post.sharpness;
+            pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_POST));
+            SrBind(pCmd,0,target.pColor.get());
+            for(uint32_t k=1;k<KFG_MAX_SLOTS;k++) pCmd->bindTexture(k,nullptr);
+            pCmd->bindTarget(s.pSrAnchorFocus.get());
+            UploadParams(pCmd,fp);pCmd->dispatch(1024/8,640/8);
+            focused=s.pSrAnchorFocus.get();
+        }
         kfg_params p={};
-        p.dst_size[0]=1280; p.dst_size[1]=800;
-        p.src_size[0]=1024; p.src_size[1]=640;
-        p.level=KFG_POST_SR_INVERSE4;
-        p.flags=int32_t(anchor);p.t=s.srTargetPhase;
-        pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_POST));
-        pCmd->bindTexture(0,std::move(raw));
-        pCmd->bindTexture(1,layer.tex);
-        for(uint32_t k=0;k<4;k++) pCmd->bindTexture(2+k,chain[k]->pColor.get());
+        p.dst_size[0]=1280;p.dst_size[1]=800;
+        p.src_size[0]=1024;p.src_size[1]=640;
+        p.level=KFG_POST_SR_CACHE;p.flags=int32_t(anchor);p.t=1.0f;
+        pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_SR_INVERSE));
+        SrBind(pCmd,0,target.pColor.get());
+        SrBind(pCmd,1,focused);
+        for(uint32_t k=0;k<4;k++) SrBind(pCmd,2+k,chain[k]->pColor.get());
         for(uint32_t k=0;k<3;k++) {
-            pCmd->bindTexture(6+k,chain[k]->pFlow[2].get());
-            pCmd->bindTexture(9+k,chain[k]->pStats.get());
+            SrBind(pCmd,6+k,chain[k]->pFlow[2].get());
+            SrBind(pCmd,9+k,chain[k]->pStats.get(),true);
         }
-        for(uint32_t slot=0;slot<12;slot++) {
-            pCmd->setTextureSrgb(slot,true);
-            pCmd->setSamplerNearest(slot,slot==1||slot>=9);
-            pCmd->setSamplerUnnormalized(slot,false);
-        }
+        pCmd->bindTarget(target.pSrDetail.get());
+        UploadParams(pCmd,p);pCmd->dispatch(1280/5,800/5);
+        target.srCacheID=target.ulID;
+        s.srLastBuildSource=s.ulPendingID;s.srCacheBuilds++;
+        return true;
+    }
+
+    static bool RecordSrInverse( CVulkanCmdBuffer *pCmd, State_t &s,
+                                 FrameInfo_t::Layer_t &layer, gamescope::Rc<CVulkanTexture> raw )
+    {
+        if(!s.srSelected||!raw||!layer.tex||raw->width()!=1024||raw->height()!=640||
+           layer.tex->width()!=1024||layer.tex->height()!=640||
+           std::abs(layer.offset.x)>0.0001f||std::abs(layer.offset.y)>0.0001f||
+           layer.opacity<0.999f||!kfg_post_after_generation(&s.post)||
+           s.post.grade||s.post.finish||s.post.aa!=KFG_AA_NONE||
+           SourceTransfer(layer)!=KFG_TRANSFER_SDR)
+            return false;
+        if(get_time_in_nanos()<s.srBudgetUntilNs || (s.bQueryUnsupported&&!s.srCaptureOnly)) return false;
+        uint32_t asz[2]; kfg_analysis_size(1024,640,asz);
+        if(asz[0]!=1024||asz[1]!=640) return false;
+        Frame_t *b=FindFrame(s,s.srTargetID);
+        if(!b||!b->pColor) return false;
+        const bool generated=s.srTargetPhase<0.999f;
+        Frame_t *a=generated?FindFrame(s,b->ulPrevID):nullptr;
+        if(generated&&(!a||!b->bAnalysisReady||!b->pPairSelect||!b->pStats)) return false;
+        if(!s.pSrInverseOutput) s.pSrInverseOutput=CreateImage(1280,800,KFG_FORMAT_RGBA8);
+        if(!s.pSrInverseOutput) return false;
+        RecordSrCache(pCmd,s,*b,layer);
+        const bool hasB=SrCacheReady(b),hasA=generated&&SrCacheReady(a);
+        if(!hasB&&!hasA) return false;
+
+        kfg_params p={};
+        p.dst_size[0]=1280;p.dst_size[1]=800;
+        p.src_size[0]=1024;p.src_size[1]=640;
+        p.flags=(hasB?1:0)|(hasA?2:0);p.t=s.srTargetPhase;
+        pCmd->bindPipeline(g_device.pipeline(SHADER_TYPE_KFG_SR_MERGE));
+        SrBind(pCmd,0,layer.tex);
+        SrBind(pCmd,1,hasB?b->pSrDetail.get():nullptr);
+        SrBind(pCmd,2,hasA?a->pSrDetail.get():nullptr);
+        SrBind(pCmd,3,generated?b->pPairSelect.get():nullptr);
+        SrBind(pCmd,4,generated?b->pStats.get():nullptr,true);
+        SrBind(pCmd,5,b->pColor.get());
+        SrBind(pCmd,6,generated?a->pColor.get():nullptr);
+        SrBind(pCmd,7,raw);
+        for(uint32_t k=8;k<KFG_MAX_SLOTS;k++) pCmd->bindTexture(k,nullptr);
         pCmd->bindTarget(s.pSrInverseOutput.get());
-        UploadParams(pCmd,p);
-        pCmd->dispatch(1280/5,800/5);
-        // Final Gamescope composite sees a native-sized layer, and does transfer decode once.
+        UploadParams(pCmd,p);pCmd->dispatch(1280/8,800/8);
         layer.tex=s.pSrInverseOutput.get();
-        layer.scale={1.0f,1.0f};
-        layer.filter=GamescopeUpscaleFilter::LINEAR;
-        s.srInverseActive=true;
-        s.srInverseFrames++;
+        layer.scale={1.0f,1.0f};layer.filter=GamescopeUpscaleFilter::LINEAR;
+        s.srInverseActive=true;s.srInverseFrames++;
         return true;
     }
 
@@ -1105,7 +1181,7 @@ namespace kfg
 		if ( s.uWidth )
 			kfg_analysis_size( s.uWidth, s.uHeight, asz );
 		fprintf( f,
-			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_inverse_active\":%s,\"sr_inverse_frames\":%" PRIu64 ",\"sr_history_frames\":%u,\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
+			" {\"sr_capable\":true,\"sr_managed_app\":%u,\"sr_virtual_width\":%d,\"sr_virtual_height\":%d,\"sr_selected\":%s,\"sr_inverse_active\":%s,\"sr_inverse_frames\":%" PRIu64 ",\"sr_history_frames\":%u,\"sr_gpu_limited\":%s,\"sr_cache_builds\":%" PRIu64 ",\"sr_width\":%u,\"sr_height\":%u,\"sr_output_width\":%u,\"sr_output_height\":%u,\"engine\":\"kedavra-gamescope\",\"version\":1,\"time_ns\":%" PRIu64 ",\"multiplier\":%u,\"state\":\"%s\","
 			"\"refresh_ns\":%" PRIu64 ",\"width\":%u,\"height\":%u,"
 			"\"paints\":%" PRIu64 ",\"applied\":%" PRIu64 ",\"bypass\":%" PRIu64 ",\"ring_miss\":%" PRIu64 ",\"unsupported\":%" PRIu64 ","
 			"\"sources\":%" PRIu64 ",\"real\":%" PRIu64 ",\"gen\":%" PRIu64 ",\"repeat\":%" PRIu64 ",\"skip\":%" PRIu64 ",\"resync\":%" PRIu64 ",\"degrade\":%" PRIu64 ",\"catchup\":%" PRIu64 ","
@@ -1117,7 +1193,7 @@ namespace kfg
 			"\"gpu_post_us_last\":%.1f,\"gpu_post_us_avg\":%.1f,\"gpu_analysis_us_last\":%.1f,\"gpu_analysis_us_avg\":%.1f,\"analysis_pairs\":%" PRIu64 ","
 			"\"hdr_enabled\":%s,\"transfer\":\"%s\",\"post_hdr_limited\":%s,"
 			"\"analysis_width\":%u,\"analysis_height\":%u,\"vrr_held\":%s,\"output_height\":%u,\"focus_status\":\"%s\",\"focus_frames\":%" PRIu64 "}\n",
-			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", (s.srSelected && s.srInverseActive) ? "true" : "false", s.srInverseFrames, s.srHistoryFrames, s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
+			s.srManagedApp, s.srVirtualWidth, s.srVirtualHeight, s.srSelected ? "true" : "false", (s.srSelected && s.srInverseActive) ? "true" : "false", s.srInverseFrames, s.srHistoryFrames, (s.srSelected&&get_time_in_nanos()<s.srBudgetUntilNs)?"true":"false", s.srCacheBuilds, s.srWidth, s.srHeight, s.srOutputWidth, s.srOutputHeight,
 			ulNow, s.uMultiplier, s.bInit ? kfg_state_name( q.state ) : "off",
 			s.ulGridPeriod, s.uWidth, s.uHeight,
 			s.ulPaints, s.ulApplied, s.ulBypass, s.ulRingMiss, s.ulUnsupported,
@@ -1240,6 +1316,7 @@ namespace kfg
 		if (pFrameInfo->layers.count()) {
 			auto &base = pFrameInfo->layers.get(0);
 			const auto sr = SuperResolutionRequest();
+            if(sr.app!=s.srBudgetApp) {s.srBudgetApp=sr.app;s.srBudgetTrips=0;s.srBudgetUntilNs=0;s.srLastBuildSource=0;}
 			if (base.tex) {
 				s.srWidth = base.tex->width();
 				s.srHeight = base.tex->height();
@@ -1510,6 +1587,7 @@ namespace kfg
 			cur.ulID = s.ulPendingID;
 			cur.bValid = true;
             cur.bAnalysisReady=false;
+            cur.srCacheID=0;
 			cur.ulPrevID = pPrev ? pPrev->ulID : 0;
 			const uint32_t fb = FrameIndex( s, &cur );
 			const uint32_t fa = pPrev ? FrameIndex( s, pPrev ) : fb;
@@ -1640,6 +1718,8 @@ namespace kfg
 		if ( oQuery )
 		{
 			g_device.vk.CmdWriteTimestamp( pCmd->rawBuffer(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queryPool, *oQuery * k_uTimingQueries + 2 );
+			s.srQueryUsed[*oQuery]=s.srInverseActive;
+            s.srQueryApp[*oQuery]=s.srBudgetApp;
 			s.pendingQueries.push_back( *oQuery );
 		}
 	}

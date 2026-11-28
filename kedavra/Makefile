@@ -12,7 +12,7 @@ WARN = -Wall -Wextra -Wno-missing-field-initializers
 GLSLANG ?= glslangValidator
 PYTHON ?= python3
 
-SHADERS = kfg_copy kfg_reduce kfg_me kfg_stats kfg_select kfg_warp kfg_post kfg_smaa_edge kfg_smaa_weight kfg_smaa_blend
+SHADERS = kfg_copy kfg_reduce kfg_me kfg_stats kfg_select kfg_warp kfg_post kfg_smaa_edge kfg_smaa_weight kfg_smaa_blend kfg_sr_inverse kfg_sr_merge
 SPV = $(SHADERS:%=$(BUILD)/%.spv)
 
 all: $(BUILD)/kfg_sim $(BUILD)/test_sched $(BUILD)/test_auto $(BUILD)/kfg_vktest $(BUILD)/kfg_posttest $(SPV)

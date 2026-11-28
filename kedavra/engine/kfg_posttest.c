@@ -620,7 +620,7 @@ static void test_sr_inverse(kfg_vk *vk)
     }
     uint8_t raw[16*16*4], prior[16*16*4], out[20*20*4];
     kfg_plan plan={0};
-    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_POST,kfg_ref(KFG_ROLE_POST,1,0),"SR inverse");
+    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_SR_INVERSE,kfg_ref(KFG_ROLE_POST,1,0),"SR inverse");
     p->nslots=2;
     p->slots[0]=kfg_ref(KFG_ROLE_POST_IN,0,0);
     p->slots[1]=kfg_ref(KFG_ROLE_POST,0,0);
@@ -659,12 +659,12 @@ cleanup:
 }
 
 
-typedef struct sr4_test_env { kfg_vk_image src[12],out; } sr4_test_env;
+typedef struct sr4_test_env { kfg_vk_image src[12],out,cache; } sr4_test_env;
 static const kfg_vk_image *sr4_resolve(void *user,kfg_image_ref r)
 {
     sr4_test_env *e=user;
     return r.role==KFG_ROLE_COLOR&&r.ring<12?&e->src[r.ring]:
-           r.role==KFG_ROLE_OUTPUT?&e->out:NULL;
+           r.role==KFG_ROLE_OUTPUT?&e->out:r.role==KFG_ROLE_POST?&e->cache:NULL;
 }
 static float sr4_test_box(float a,float b,float pix)
 {
@@ -678,9 +678,9 @@ static void test_sr_inverse4(kfg_vk *vk)
     int ok=1;
     for(int i=0;i<12;i++)
         if(kfg_vk_image_create(vk,&e.src[i],i<6?rgba:half,i<6?W:i<9?W/4:1,i<6?H:i<9?H/4:1)) { ok=0;break; }
-    if(!ok||kfg_vk_image_create(vk,&e.out,rgba,OW,OH)) { CHECK(0,"SR4 image allocation");goto cleanup; }
+    if(!ok||kfg_vk_image_create(vk,&e.out,rgba,OW,OH)||kfg_vk_image_create(vk,&e.cache,rgba,OW,OH)) { CHECK(0,"SR4 image allocation");goto cleanup; }
     float gt[OW*OH];
-    uint8_t raw[4][W*H*4], out[OW*OH*4],fallback[OW*OH*4];
+    uint8_t raw[4][W*H*4], out[OW*OH*4],fallback[OW*OH*4],direct[OW*OH*4];
     const int sx[4]={0,1,0,1},sy[4]={0,0,1,1};
     for(int y=0;y<OH;y++) for(int x=0;x<OW;x++)
         gt[y*OW+x]=0.5f+0.19f*sinf(1.65f*x+0.23f*y)+0.16f*cosf(1.4f*y-0.3f*x);
@@ -710,10 +710,10 @@ static void test_sr_inverse4(kfg_vk *vk)
     }
     if(!ok) { CHECK(0,"SR4 upload");goto cleanup; }
     kfg_plan plan={0};
-    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_POST,kfg_ref(KFG_ROLE_OUTPUT,0,0),"SR4 inverse");
+    kfg_pass *p=kfg_plan_add(&plan,KFG_SHADER_SR_INVERSE,kfg_ref(KFG_ROLE_OUTPUT,0,0),"SR4 inverse");
     p->nslots=12;
     for(int i=0;i<12;i++)p->slots[i]=kfg_ref(KFG_ROLE_COLOR,i,0);
-    p->nearest_mask=(1u<<1)|(7u<<9);
+    p->nearest_mask=(7u<<9);
     p->params.level=KFG_POST_SR_INVERSE4;
     p->params.dst_size[0]=OW;p->params.dst_size[1]=OH;
     p->params.src_size[0]=W;p->params.src_size[1]=H;
@@ -736,12 +736,33 @@ static void test_sr_inverse4(kfg_vk *vk)
             CHECK(out[4*i+3]==255,"SR4 alpha");
         }
         printf("  SR4 mode %d: SSE %.6f spatial %.6f\n",mode,err,base);
-        if(mode==1) CHECK(err<base*0.9,"four measured lattices must improve over cut fallback");
+        if(mode==1) { CHECK(err<base*0.9,"four measured lattices must improve over cut fallback");memcpy(direct,out,sizeof(out)); }
         if(mode==2) CHECK(err<base*1.25,"SR4 registration must not substantially worsen reference");
+    }
+    // Real-anchor cache plus inexpensive output merge must reproduce the
+    // direct four-frame inverse to within the 8-bit cache quantization.
+    if(ok) {
+        p->dst=kfg_ref(KFG_ROLE_POST,0,0);
+        p->params.level=KFG_POST_SR_CACHE;p->params.radius=1;
+        kfg_pass *m=kfg_plan_add(&plan,KFG_SHADER_SR_MERGE,kfg_ref(KFG_ROLE_OUTPUT,0,0),"SR cached merge");
+        m->nslots=2;m->slots[0]=kfg_ref(KFG_ROLE_COLOR,1,0);m->slots[1]=kfg_ref(KFG_ROLE_POST,0,0);
+        m->params.dst_size[0]=OW;m->params.dst_size[1]=OH;
+        m->params.src_size[0]=W;m->params.src_size[1]=H;
+        m->params.flags=1;m->params.t=1.0f;m->groups[0]=(OW+7)/8;m->groups[1]=(OH+7)/8;
+        kfg_vk_begin(vk);
+        if(kfg_vk_record(vk,&plan,sr4_resolve,&e)||kfg_vk_submit_wait(vk)||
+           kfg_vk_download_rgba8(vk,&e.out,out)) CHECK(0,"SR cache/merge dispatch");
+        else {
+            int maxdiff=0;
+            for(int i=0;i<OW*OH*4;i++) {int d=abs((int)out[i]-(int)direct[i]);if(d>maxdiff)maxdiff=d;}
+            printf("  SR cache/merge max code difference %d\n",maxdiff);
+            CHECK(maxdiff<=2,"cached real output differs from direct inverse");
+        }
     }
 cleanup:
     for(int i=0;i<12;i++)kfg_vk_image_destroy(vk,&e.src[i]);
     kfg_vk_image_destroy(vk,&e.out);
+    kfg_vk_image_destroy(vk,&e.cache);
 }
 
 #include "kfg_post_batch.h"

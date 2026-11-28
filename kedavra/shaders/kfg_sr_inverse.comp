@@ -1,0 +1,364 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "kfg_common.glsl"
+#include "kfg_sr.glsl"
+layout(local_size_x=8,local_size_y=8) in;
+const vec3 LUMA709=vec3(0.2126,0.7152,0.0722);
+#define STAGE_SR_INVERSE 4
+// 5x5 unknown interior, 7x7 spatial-prior halo, 4x4 original observations.
+// C = (A^T A + 0.003 I)^-1 A^T, A is the interior of separable
+// area integration followed by a mild [0.05,0.90,0.05] forward model.
+// Outside-block samples are held at the Focus-based spatial prior.
+// Both source textures are sampled in their encoded SDR values.
+const vec4 srForwardRows[4] = vec4[4](vec4(0.04000000, 0.73000000, 0.22000000, 0.01000000), vec4(0.03000000, 0.56000000, 0.39000000, 0.02000000), vec4(0.02000000, 0.39000000, 0.56000000, 0.03000000), vec4(0.01000000, 0.22000000, 0.73000000, 0.04000000));
+const vec4 srInverseWeights[100] = vec4[100](
+    vec4(1.83037499, -0.55766501, 0.18594667, -0.03957677), vec4(-0.55766501, 0.16459837, -0.05322437, 0.01106642), vec4(0.18594667, -0.05322437, 0.01668553, -0.00338519), vec4(-0.03957677, 0.01106642, -0.00338519, 0.00067309),
+    vec4(0.05340794, 1.83737413, -0.66565591, 0.14279400), vec4(-0.02047272, -0.55435386, 0.19553947, -0.04102089), vec4(0.00813946, 0.18315086, -0.06293653, 0.01290790), vec4(-0.00193961, -0.03871606, 0.01303920, -0.00262668),
+    vec4(-0.20984651, 0.87085923, 0.87085923, -0.20984651), vec4(0.06295371, -0.26621097, -0.26621097, 0.06295371), vec4(-0.02067910, 0.08904046, 0.08904046, -0.02067910), vec4(0.00435135, -0.01899471, -0.01899471, 0.00435135),
+    vec4(0.14279400, -0.66565591, 1.83737413, 0.05340794), vec4(-0.04102089, 0.19553947, -0.55435386, -0.02047272), vec4(0.01290790, -0.06293653, 0.18315086, 0.00813946), vec4(-0.00262668, 0.01303920, -0.03871606, -0.00193961),
+    vec4(-0.03957677, 0.18594667, -0.55766501, 1.83037499), vec4(0.01106642, -0.05322437, 0.16459837, -0.55766501), vec4(-0.00338519, 0.01668553, -0.05322437, 0.18594667), vec4(0.00067309, -0.00338519, 0.01106642, -0.03957677),
+    vec4(0.05340794, -0.02047272, 0.00813946, -0.00193961), vec4(1.83737413, -0.55435386, 0.18315086, -0.03871606), vec4(-0.66565591, 0.19553947, -0.06293653, 0.01303920), vec4(0.14279400, -0.04102089, 0.01290790, -0.00262668),
+    vec4(-0.00176688, 0.05792108, -0.02517575, 0.00613315), vec4(0.05792108, 1.83882584, -0.66075435, 0.14079795), vec4(-0.02517575, -0.66075435, 0.23213401, -0.04853296), vec4(0.00613315, 0.14079795, -0.04853296, 0.00998099),
+    vec4(-0.00689947, 0.02471073, 0.02471073, -0.00689947), vec4(-0.20963760, 0.87509542, 0.87509542, -0.20963760), vec4(0.07496780, -0.31791713, -0.31791713, 0.07496780), vec4(-0.01590816, 0.06835221, 0.06835221, -0.01590816),
+    vec4(0.00613315, -0.02517575, 0.05792108, -0.00176688), vec4(0.14079795, -0.66075435, 1.83882584, 0.05792108), vec4(-0.04853296, 0.23213401, -0.66075435, -0.02517575), vec4(0.00998099, -0.04853296, 0.14079795, 0.00613315),
+    vec4(-0.00193961, 0.00813946, -0.02047272, 0.05340794), vec4(-0.03871606, 0.18315086, -0.55435386, 1.83737413), vec4(0.01303920, -0.06293653, 0.19553947, -0.66565591), vec4(-0.00262668, 0.01290790, -0.04102089, 0.14279400),
+    vec4(-0.20984651, 0.06295371, -0.02067910, 0.00435135), vec4(0.87085923, -0.26621097, 0.08904046, -0.01899471), vec4(0.87085923, -0.26621097, 0.08904046, -0.01899471), vec4(-0.20984651, 0.06295371, -0.02067910, 0.00435135),
+    vec4(-0.00689947, -0.20963760, 0.07496780, -0.01590816), vec4(0.02471073, 0.87509542, -0.31791713, 0.06835221), vec4(0.02471073, 0.87509542, -0.31791713, 0.06835221), vec4(-0.00689947, -0.20963760, 0.07496780, -0.01590816),
+    vec4(0.02387985, -0.10000494, -0.10000494, 0.02387985), vec4(-0.10000494, 0.41419181, 0.41419181, -0.10000494), vec4(-0.10000494, 0.41419181, 0.41419181, -0.10000494), vec4(0.02387985, -0.10000494, -0.10000494, 0.02387985),
+    vec4(-0.01590816, 0.07496780, -0.20963760, -0.00689947), vec4(0.06835221, -0.31791713, 0.87509542, 0.02471073), vec4(0.06835221, -0.31791713, 0.87509542, 0.02471073), vec4(-0.01590816, 0.07496780, -0.20963760, -0.00689947),
+    vec4(0.00435135, -0.02067910, 0.06295371, -0.20984651), vec4(-0.01899471, 0.08904046, -0.26621097, 0.87085923), vec4(-0.01899471, 0.08904046, -0.26621097, 0.87085923), vec4(0.00435135, -0.02067910, 0.06295371, -0.20984651),
+    vec4(0.14279400, -0.04102089, 0.01290790, -0.00262668), vec4(-0.66565591, 0.19553947, -0.06293653, 0.01303920), vec4(1.83737413, -0.55435386, 0.18315086, -0.03871606), vec4(0.05340794, -0.02047272, 0.00813946, -0.00193961),
+    vec4(0.00613315, 0.14079795, -0.04853296, 0.00998099), vec4(-0.02517575, -0.66075435, 0.23213401, -0.04853296), vec4(0.05792108, 1.83882584, -0.66075435, 0.14079795), vec4(-0.00176688, 0.05792108, -0.02517575, 0.00613315),
+    vec4(-0.01590816, 0.06835221, 0.06835221, -0.01590816), vec4(0.07496780, -0.31791713, -0.31791713, 0.07496780), vec4(-0.20963760, 0.87509542, 0.87509542, -0.20963760), vec4(-0.00689947, 0.02471073, 0.02471073, -0.00689947),
+    vec4(0.00998099, -0.04853296, 0.14079795, 0.00613315), vec4(-0.04853296, 0.23213401, -0.66075435, -0.02517575), vec4(0.14079795, -0.66075435, 1.83882584, 0.05792108), vec4(0.00613315, -0.02517575, 0.05792108, -0.00176688),
+    vec4(-0.00262668, 0.01290790, -0.04102089, 0.14279400), vec4(0.01303920, -0.06293653, 0.19553947, -0.66565591), vec4(-0.03871606, 0.18315086, -0.55435386, 1.83737413), vec4(-0.00193961, 0.00813946, -0.02047272, 0.05340794),
+    vec4(-0.03957677, 0.01106642, -0.00338519, 0.00067309), vec4(0.18594667, -0.05322437, 0.01668553, -0.00338519), vec4(-0.55766501, 0.16459837, -0.05322437, 0.01106642), vec4(1.83037499, -0.55766501, 0.18594667, -0.03957677),
+    vec4(-0.00193961, -0.03871606, 0.01303920, -0.00262668), vec4(0.00813946, 0.18315086, -0.06293653, 0.01290790), vec4(-0.02047272, -0.55435386, 0.19553947, -0.04102089), vec4(0.05340794, 1.83737413, -0.66565591, 0.14279400),
+    vec4(0.00435135, -0.01899471, -0.01899471, 0.00435135), vec4(-0.02067910, 0.08904046, 0.08904046, -0.02067910), vec4(0.06295371, -0.26621097, -0.26621097, 0.06295371), vec4(-0.20984651, 0.87085923, 0.87085923, -0.20984651),
+    vec4(-0.00262668, 0.01303920, -0.03871606, -0.00193961), vec4(0.01290790, -0.06293653, 0.18315086, 0.00813946), vec4(-0.04102089, 0.19553947, -0.55435386, -0.02047272), vec4(0.14279400, -0.66565591, 1.83737413, 0.05340794),
+    vec4(0.00067309, -0.00338519, 0.01106642, -0.03957677), vec4(-0.00338519, 0.01668553, -0.05322437, 0.18594667), vec4(0.01106642, -0.05322437, 0.16459837, -0.55766501), vec4(-0.03957677, 0.18594667, -0.55766501, 1.83037499)
+);
+shared float srPriorLuma[49];
+shared float srMeasurementError[16];
+shared uint srInvalidAlpha;
+
+float srForwardRow(int y, int x, vec4 k)
+{
+    int j=y*7+x;
+    return dot(k,vec4(srPriorLuma[j],srPriorLuma[j+1],srPriorLuma[j+2],srPriorLuma[j+3]));
+}
+
+void srInverse()
+{
+    int lane=int(gl_LocalInvocationIndex);
+    ivec2 tile=ivec2(gl_WorkGroupID.xy);
+    ivec2 local=ivec2(lane%7,lane/7);
+    vec4 prior=vec4(0.0);
+    if(lane==0) srInvalidAlpha=0u;
+    if(lane<49) {
+        ivec2 p=clamp(tile*5+local-ivec2(1),ivec2(0),u_dstSize-ivec2(1));
+        prior=kfgReconstruct(s_samplers[1],(vec2(p)+0.5)*0.8,u_srcSize,true);
+        srPriorLuma[lane]=dot(prior.rgb,LUMA709);
+    }
+    barrier();
+    if(lane<16) {
+        int x=lane%4,y=lane/4;
+        vec4 k=srForwardRows[x];
+        float predicted=dot(srForwardRows[y],vec4(srForwardRow(y,x,k),srForwardRow(y+1,x,k),srForwardRow(y+2,x,k),srForwardRow(y+3,x,k)));
+        vec4 measured=texelFetch(s_samplers[0],tile*4+ivec2(x,y),0);
+        if(measured.a<0.999) atomicOr(srInvalidAlpha,1u);
+        srMeasurementError[lane]=dot(measured.rgb,LUMA709)-predicted;
+    }
+    barrier();
+    if(lane<49 && all(greaterThanEqual(local,ivec2(1))) && all(lessThanEqual(local,ivec2(5)))) {
+        int j=4*((local.y-1)*5+local.x-1);
+        float correction=dot(srInverseWeights[j],vec4(srMeasurementError[0],srMeasurementError[1],srMeasurementError[2],srMeasurementError[3]))
+                        +dot(srInverseWeights[j+1],vec4(srMeasurementError[4],srMeasurementError[5],srMeasurementError[6],srMeasurementError[7]))
+                        +dot(srInverseWeights[j+2],vec4(srMeasurementError[8],srMeasurementError[9],srMeasurementError[10],srMeasurementError[11]))
+                        +dot(srInverseWeights[j+3],vec4(srMeasurementError[12],srMeasurementError[13],srMeasurementError[14],srMeasurementError[15]));
+        if(srInvalidAlpha!=0u || prior.a<0.999) correction=0.0;
+        vec3 rgb=clamp(prior.rgb+vec3(clamp(0.75*correction,-0.15,0.15)),0.0,1.0);
+        imageStore(dst,tile*5+local-ivec2(1),vec4(rgb,prior.a));
+    }
+}
+
+
+#define STAGE_SR_INVERSE4 5
+#define STAGE_SR_CACHE 6
+// Four actual source images (2..5), three bidirectional pair fields (6..8),
+// and three scene-cut stats (9..11). Slot 0 is the displayed raw geometry,
+// slot 1 its Focus result, used only for the prior. Generated images are never
+// included as observations. Static sampler indexing also avoids nonuniform
+// descriptor-indexing requirements on the Deck.
+vec4 sr4Raw(int f, ivec2 q)
+{
+    if(f==0) return texelFetch(s_samplers[2],q,0);
+    if(f==1) return texelFetch(s_samplers[3],q,0);
+    if(f==2) return texelFetch(s_samplers[4],q,0);
+    return texelFetch(s_samplers[5],q,0);
+}
+vec4 sr4Tap(int f, vec2 q)
+{
+    vec2 uv=(q+0.5)/vec2(u_srcSize);
+    if(f==0) return textureLod(s_samplers[2],uv,0.0);
+    if(f==1) return textureLod(s_samplers[3],uv,0.0);
+    if(f==2) return textureLod(s_samplers[4],uv,0.0);
+    return textureLod(s_samplers[5],uv,0.0);
+}
+vec4 sr4Flow(int f, vec2 q)
+{
+    vec2 uv=(q+0.5)/vec2(u_srcSize);
+    if(f==0) return textureLod(s_samplers[6],uv,0.0);
+    if(f==1) return textureLod(s_samplers[7],uv,0.0);
+    return textureLod(s_samplers[8],uv,0.0);
+}
+bool sr4Cut()
+{
+    return texelFetch(s_samplers[9],ivec2(0),0).x>0.5 ||
+           texelFetch(s_samplers[10],ivec2(0),0).x>0.5 ||
+           texelFetch(s_samplers[11],ivec2(0),0).x>0.5;
+}
+float sr4Y(int f,vec2 q) { return dot(sr4Tap(f,q).rgb,LUMA709); }
+float sr4Current(vec2 q) { return dot(textureLod(s_samplers[0],(q+0.5)/vec2(u_srcSize),0.0).rgb,LUMA709); }
+bool sr4Inside(vec2 q) { return all(greaterThanEqual(q,vec2(2.0))) && all(lessThanEqual(q,vec2(u_srcSize)-3.0)); }
+shared vec2 sr4Pos[4];
+shared vec2 sr4Shift[4];
+shared ivec2 sr4Start[4];
+shared float sr4Conf[4];
+shared uint sr4Valid;
+shared float sr4Blend;
+shared float sr4Prior[81];
+shared vec4 sr4Color[25];
+shared float sr4Ax[144],sr4Ay[144],sr4Proj[144];
+shared float sr4Err[64],sr4AdjY[80];
+shared float sr4Gx[100],sr4Gy[100],sr4H[625];
+shared float sr4X[25],sr4R[25],sr4P[25],sr4AP[25],sr4Diag[25],sr4Dot[25];
+shared float sr4Rz,sr4Alpha,sr4Beta;
+
+// The coarser 4x4 motion field supplies a seed. Two bounded LK steps on
+// native source luminance recover fractional sampling positions. Only
+// source observations go into the inverse, not these bilinear registration taps.
+float sr4Refine(int f,vec2 center,inout vec2 q)
+{
+    if(!sr4Inside(center)||!sr4Inside(q)) return 0.0;
+    vec2 seed=q;
+    for(int it=0;it<2;it++) {
+        float xx=0.003,yy=0.003,xy=0.0,bx=0.0,by=0.0;
+        for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+            vec2 d=1.5*vec2(x,y);
+            float e=sr4Current(center+d)-sr4Y(f,q+d);
+            vec2 g=vec2(sr4Y(f,q+d+vec2(0.5,0))-sr4Y(f,q+d-vec2(0.5,0)),
+                        sr4Y(f,q+d+vec2(0,0.5))-sr4Y(f,q+d-vec2(0,0.5)));
+            float w=min(1.0,0.075/max(abs(e),0.001));
+            xx+=w*g.x*g.x; yy+=w*g.y*g.y; xy+=w*g.x*g.y;
+            bx+=w*g.x*e; by+=w*g.y*e;
+        }
+        float det=max(xx*yy-xy*xy,1e-8);
+        vec2 stepv=vec2(yy*bx-xy*by,xx*by-xy*bx)/det;
+        q+=stepv*min(1.0,0.75/max(length(stepv),0.001));
+        if(!sr4Inside(q)) return 0.0;
+    }
+    float e=0.0,eStatic=0.0;
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+        vec2 d=1.5*vec2(x,y); float cur=sr4Current(center+d);
+        e+=abs(cur-sr4Y(f,q+d)); eStatic+=abs(cur-sr4Y(f,center+d));
+    }
+    e/=9.0; eStatic/=9.0;
+    // Screen-fixed text/HUD must not accumulate moving-background samples.
+    if(eStatic<0.018 && eStatic+0.004<e) { q=center; e=eStatic; }
+    return (1.0-smoothstep(0.025,0.10,e))*(1.0-smoothstep(0.9,1.51,length(q-seed)));
+}
+float sr4Box(float center,float pix)
+{
+    return max(0.0,min(pix+1.0,center+0.625)-max(pix,center-0.625))*0.8;
+}
+float sr4Axis(float center,float pix)
+{
+    // Mild, not assumed exact, optical prefilter. Do not invert a strong
+    // unknown TAA blur: that can amplify ringing catastrophically.
+    return 0.90*sr4Box(center,pix)+0.05*(sr4Box(center-1.0,pix)+sr4Box(center+1.0,pix));
+}
+void sr4StorePrior(int lane,ivec2 tile)
+{
+    if(lane>=25) return;
+    ivec2 p=tile*5+ivec2(lane%5,lane/5);
+    if(u_level==STAGE_SR_CACHE)
+        imageStore(dst,p,vec4(128.0/255.0,0.0,0.0,0.0));
+    else
+        imageStore(dst,p,kfgReconstruct(s_samplers[1],(vec2(p)+0.5)*0.8,u_srcSize,true));
+}
+void srInverse4()
+{
+    int lane=int(gl_LocalInvocationIndex);
+    ivec2 tile=ivec2(gl_WorkGroupID.xy);
+    vec2 center=vec2(tile*4)+1.5;
+    int anchor=clamp(u_flags,0,3);
+    if(lane==0) {
+        sr4Valid=sr4Cut()?0u:1u;
+        sr4Pos[anchor]=center;
+        sr4Conf[anchor]=1.0;
+        // The target may be a generated phase between this anchor (B) and
+        // its predecessor (A). Estimate B's position, not a synthetic sample.
+        if(u_t<0.999 && anchor<3) {
+            vec2 q=center;
+            for(int j=0;j<2;j++) q=center-(1.0-u_t)*sr4Flow(anchor,q).zw;
+            sr4Pos[anchor]=q;
+        }
+        for(int f=anchor;f<3;f++) {
+            vec2 q=sr4Pos[f]; vec2 b=sr4Flow(f,q).zw;
+            vec2 p=q+b; vec2 fw=sr4Flow(f,p).xy;
+            sr4Pos[f+1]=p;
+            sr4Conf[f+1]=sr4Conf[f]*(1.0-smoothstep(0.35,2.0,length(b+fw)));
+        }
+        for(int f=anchor-1;f>=0;f--) {
+            vec2 q=sr4Pos[f+1]; vec2 fw=sr4Flow(f,q).xy;
+            vec2 p=q+fw; vec2 b=sr4Flow(f,p).zw;
+            sr4Pos[f]=p;
+            sr4Conf[f]=sr4Conf[f+1]*(1.0-smoothstep(0.35,2.0,length(b+fw)));
+        }
+    }
+    barrier();
+    if(lane<4 && sr4Valid!=0u) {
+        vec2 q=sr4Pos[lane];
+        if(!(lane==anchor&&u_t>=0.999) && u_radius!=1)
+            sr4Conf[lane]*=sr4Refine(lane,center,q);
+        if(!sr4Inside(q)) sr4Conf[lane]=0.0;
+        sr4Shift[lane]=q-center;
+        sr4Start[lane]=tile*4+ivec2(floor(sr4Shift[lane]+0.5));
+    }
+    barrier();
+    if(lane==0 && sr4Valid!=0u) {
+        float conf=min(min(sr4Conf[0],sr4Conf[1]),min(sr4Conf[2],sr4Conf[3]));
+        float diversity=0.0;
+        for(int f=0;f<4;f++) for(int g=f+1;g<4;g++)
+            diversity=max(diversity,length(fract(sr4Shift[f]-sr4Shift[g]+0.5)-0.5));
+        if(conf<0.15||diversity<0.12) sr4Valid=0u;
+        for(int f=0;f<4;f++)
+            if(any(lessThan(sr4Start[f],ivec2(0)))||
+               any(greaterThanEqual(sr4Start[f]+3,u_srcSize))) sr4Valid=0u;
+        sr4Blend=smoothstep(0.15,0.55,conf);
+    }
+    barrier();
+    if(sr4Valid==0u) { sr4StorePrior(lane,tile); return; }
+
+    // Rejected tiles have already returned. Only the 25 interior pixels
+    // need the full learned spatial prior. The halo is bilinear, using the
+    // same Focus image; this reduces redundant reconstruction by 69%.
+    for(int i=lane;i<81;i+=64) {
+        ivec2 local=ivec2(i%9,i/9)-2;
+        ivec2 p=clamp(tile*5+local,ivec2(0),u_dstSize-1);
+        bool interior=all(greaterThanEqual(local,ivec2(0)))&&all(lessThan(local,ivec2(5)));
+        vec4 c=interior?kfgReconstruct(s_samplers[1],(vec2(p)+0.5)*0.8,u_srcSize,true):
+                         textureLod(s_samplers[1],(vec2(p)+0.5)/vec2(u_dstSize),0.0);
+        sr4Prior[i]=dot(c.rgb,LUMA709);
+        if(interior) sr4Color[local.y*5+local.x]=c;
+    }
+    barrier();
+    // Dynamic forward operator: each source frame has its own sampling
+    // lattice. The 64 measured texels constrain 25 HR unknowns.
+    for(int i=lane;i<144;i+=64) {
+        int f=i/36, row=(i/9)%4, pix=i%9-2;
+        vec2 offset=(vec2(sr4Start[f]-tile*4)-sr4Shift[f])*1.25;
+        sr4Ax[i]=sr4Axis((float(row)+0.5)*1.25+offset.x,float(pix));
+        sr4Ay[i]=sr4Axis((float(row)+0.5)*1.25+offset.y,float(pix));
+    }
+    barrier();
+    for(int i=lane;i<144;i+=64) {
+        int f=i/36, x=(i/9)%4, y=i%9;
+        float z=0.0;
+        for(int k=0;k<9;k++) z+=sr4Ax[f*36+x*9+k]*sr4Prior[y*9+k];
+        sr4Proj[i]=z;
+    }
+    barrier();
+    int f=lane/16, x=lane%4,y=(lane%16)/4;
+    vec4 m=sr4Raw(f,sr4Start[f]+ivec2(x,y));
+    float pred=0.0;
+    for(int k=0;k<9;k++) pred+=sr4Ay[f*36+y*9+k]*sr4Proj[f*36+x*9+k];
+    sr4Err[lane]=dot(m.rgb,LUMA709)-pred;
+    if(m.a<0.999) atomicAnd(sr4Valid,0u);
+    barrier();
+    if(sr4Valid==0u) { sr4StorePrior(lane,tile); return; }
+
+    // Separable Gram and adjoint, then a 25x25 local normal equation.
+    // Confidence is per observation lattice, not a blend of upscaled frames.
+    for(int i=lane;i<100;i+=64) {
+        int g=i/25, a=(i/5)%5,b=i%5; float gx=0.0,gy=0.0;
+        for(int k=0;k<4;k++) {
+            int o=g*36+k*9+2;
+            gx+=sr4Ax[o+a]*sr4Ax[o+b];
+            gy+=sr4Ay[o+a]*sr4Ay[o+b];
+        }
+        sr4Gx[i]=gx;sr4Gy[i]=gy;
+    }
+    for(int i=lane;i<80;i+=64) {
+        int g=i/20, yy=(i/4)%5, xx=i%4; float z=0.0;
+        for(int k=0;k<4;k++) z+=sr4Ay[g*36+k*9+yy+2]*sr4Err[g*16+k*4+xx];
+        sr4AdjY[i]=z;
+    }
+    barrier();
+    if(lane<25) {
+        int yy=lane/5,xx=lane%5;
+        float b=0.0;
+        for(int g=0;g<4;g++) {
+            float z=0.0;
+            for(int k=0;k<4;k++) z+=sr4Ax[g*36+k*9+xx+2]*sr4AdjY[g*20+yy*4+k];
+            b+=sr4Conf[g]*z;
+        }
+        for(int j=0;j<25;j++) {
+            float h=lane==j?0.012:0.0;
+            for(int g=0;g<4;g++)
+                h+=sr4Conf[g]*sr4Gx[g*25+xx*5+j%5]*sr4Gy[g*25+yy*5+j/5];
+            sr4H[lane*25+j]=h;
+        }
+        sr4Diag[lane]=max(sr4H[lane*25+lane],0.012);
+        sr4X[lane]=0.0;sr4R[lane]=b;sr4P[lane]=b/sr4Diag[lane];
+        sr4Dot[lane]=b*sr4P[lane];
+    }
+    barrier();
+    if(lane==0) { sr4Rz=0.0; for(int j=0;j<25;j++) sr4Rz+=sr4Dot[j]; }
+    barrier();
+    // Four PCG iterations, once per real anchor in production.
+    for(int it=0;it<4;it++) {
+        if(lane<25) {
+            float ap=0.0;for(int j=0;j<25;j++) ap+=sr4H[lane*25+j]*sr4P[j];
+            sr4AP[lane]=ap;sr4Dot[lane]=sr4P[lane]*ap;
+        }
+        barrier();
+        if(lane==0) {
+            float den=0.0;for(int j=0;j<25;j++) den+=sr4Dot[j];
+            sr4Alpha=(sr4Rz>1e-12&&den>1e-12)?sr4Rz/den:0.0;
+        }
+        barrier();
+        if(lane<25) {
+            sr4X[lane]+=sr4Alpha*sr4P[lane];
+            sr4R[lane]-=sr4Alpha*sr4AP[lane];
+            sr4Dot[lane]=sr4R[lane]*sr4R[lane]/sr4Diag[lane];
+        }
+        barrier();
+        if(lane==0) {
+            float next=0.0;for(int j=0;j<25;j++) next+=sr4Dot[j];
+            sr4Beta=sr4Rz>1e-12?next/sr4Rz:0.0;sr4Rz=next;
+        }
+        barrier();
+        if(lane<25) sr4P[lane]=sr4R[lane]/sr4Diag[lane]+sr4Beta*sr4P[lane];
+        barrier();
+    }
+    if(lane<25) {
+        vec4 prior=sr4Color[lane];
+        float corr=prior.a<0.999?0.0:clamp(0.9*sr4Blend*sr4X[lane],-0.18,0.18);
+        if(isnan(corr)||isinf(corr)) corr=0.0;
+        ivec2 p=tile*5+ivec2(lane%5,lane/5);
+        // R channel is a signed residual around exactly code 128; zero is
+        // exactly representable even when an RGBA8 cache is interpolated.
+        if(u_level==STAGE_SR_CACHE)
+            imageStore(dst,p,vec4((128.0+635.0*corr)/255.0,0.0,0.0,1.0));
+        else
+            imageStore(dst,p,vec4(clamp(prior.rgb+vec3(corr),0.0,1.0),prior.a));
+    }
+}
+
+void main() {
+    if(u_level==STAGE_SR_INVERSE) srInverse();
+    else srInverse4();
+}
