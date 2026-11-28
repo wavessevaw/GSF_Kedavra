@@ -61,7 +61,7 @@ diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
 index 89e9494..a10825f 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -45,6 +45,18 @@
+@@ -45,6 +45,20 @@
  #include "cs_composite_rcas_1px.h"
  #include "cs_easu.h"
  #include "cs_easu_fp16.h"
@@ -72,6 +72,8 @@ index 89e9494..a10825f 100644
 +#include "cs_kfg_select.h"
 +#include "cs_kfg_warp.h"
 +#include "cs_kfg_post.h"
++#include "cs_kfg_sr_inverse.h"
++#include "cs_kfg_sr_merge.h"
 +#include "cs_kfg_smaa_edge.h"
 +#include "cs_kfg_smaa_weight.h"
 +#include "cs_kfg_smaa_blend.h"
@@ -80,7 +82,7 @@ index 89e9494..a10825f 100644
  #include "cs_gaussian_blur_horizontal.h"
  #include "cs_nis.h"
  #include "cs_nis_fp16.h"
-@@ -990,6 +1002,18 @@ bool CVulkanDevice::createShaders()
+@@ -990,6 +1004,18 @@ bool CVulkanDevice::createShaders()
  	}
  	SHADER(RGB_TO_NV12, cs_rgb_to_nv12);
  	SHADER(SGSR, cs_sgsr);
@@ -99,7 +101,7 @@ index 89e9494..a10825f 100644
  #undef SHADER
  
  	for (uint32_t i = 0; i < shaderInfos.size(); i++)
-@@ -1222,6 +1246,18 @@ void CVulkanDevice::compileAllPipelines(std::stop_token st)
+@@ -1222,6 +1248,18 @@ void CVulkanDevice::compileAllPipelines(std::stop_token st)
  	SHADER(NIS_HDR_LINEAR, 1, 1, 1);
  	SHADER(RGB_TO_NV12, 1, 1, 1);
  	SHADER(SGSR, 1, 1, 1);
@@ -118,7 +120,7 @@ index 89e9494..a10825f 100644
  #undef SHADER
  
  	for (auto& info : pipelineInfos) {
-@@ -4415,6 +4451,18 @@ namespace
+@@ -4415,6 +4453,18 @@ namespace
  
  ReshadeEffectPipeline *g_pLastReshadeEffect = nullptr;
  
@@ -137,7 +139,7 @@ index 89e9494..a10825f 100644
  std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pPipewireTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride, bool increment, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer )
  {
  	EOTF outputTF = frameInfo->outputEncodingEOTF;
-@@ -4469,6 +4517,10 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+@@ -4469,6 +4519,10 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
  
  	const std::optional<uint32_t> oTimingSlot = CompositeTimingBegin( cmdBuffer.get() );
  
